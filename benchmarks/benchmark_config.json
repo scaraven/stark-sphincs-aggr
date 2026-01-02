@@ -1,0 +1,29 @@
+{
+  "description": "SPHINCS+ STARK Benchmark Configuration",
+  "benchmarks": [
+    {
+      "name": "sphincs_sha2_baseline",
+      "description": "Baseline SPHINCS+ with SHA2 hasher",
+      "features": [],
+      "args_file": "packages/sphincs-plus/tests/data/sha2_simple_128s.json",
+      "proving_task": "packages/sphincs-plus/proving_task.json",
+      "prover_params": "prover_params.json"
+    },
+    {
+      "name": "sphincs_blake2s_sparse",
+      "description": "SPHINCS+ with BLAKE2s hasher and sparse addressing",
+      "features": ["blake_hash", "sparse_addr"],
+      "args_file": "packages/sphincs-plus/tests/data/sha2_simple_128s.json",
+      "proving_task": "packages/sphincs-plus/proving_task.json",
+      "prover_params": "prover_params.json"
+    },
+    {
+      "name": "sphincs_blake2s_dense",
+      "description": "SPHINCS+ with BLAKE2s hasher and dense addressing",
+      "features": ["blake_hash"],
+      "args_file": "packages/sphincs-plus/tests/data/sha2_simple_128s.json",
+      "proving_task": "packages/sphincs-plus/proving_task.json",
+      "prover_params": "prover_params.json"
+    }
+  ]
+}

@@ -5,7 +5,7 @@
         "fri_config": {
             "log_last_layer_degree_bound": 0,
             "log_blowup_factor": 1,
-            "n_queries": 70
+            "n_queries": 20
         }
     },
     "preprocessed_trace": "canonical_without_pedersen"

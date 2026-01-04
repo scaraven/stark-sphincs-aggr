@@ -149,13 +149,14 @@ class BenchmarkRunner:
         print(f"{'='*60}")
         
         proof_name = f"proof_{int(time.time())}"
+        proof_path = self.target_dir / f"{proof_name}.proof"
         
         cmd = [
             "stwo_run_and_prove",
             "--program", str(self.workspace_root / "resources" / "simple_bootloader_compiled.json"),
             "--program_input", proving_task,
             "--prover_params_json", prover_params,
-            "--proofs_dir", str(self.target_dir),
+            "--proof_path", str(proof_path),
             "--proof-format", "cairo-serde",
             "--verify"
         ]

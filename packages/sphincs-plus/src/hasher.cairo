@@ -4,6 +4,7 @@
 
 // Available hash functions.
 mod blake2s;
+mod poseidon;
 mod sha256;
 
 // Cairo-friendly hash function (custom AIR in Stwo)

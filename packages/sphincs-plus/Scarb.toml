@@ -9,6 +9,7 @@ edition = "2024_07"
 
 [dependencies]
 cairo_execute = "2.11.4"
+oracle = "0.1.0-dev.4"
 
 [dev-dependencies]
 cairo_test = "2.11.4"
@@ -17,3 +18,4 @@ cairo_test = "2.11.4"
 default = []
 blake_hash = []
 sparse_addr = []
+poseidon_hash = []

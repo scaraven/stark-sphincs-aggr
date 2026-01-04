@@ -33,7 +33,11 @@ fn main(args: Args) {
 fn check_result(res: bool) { // TODO: generate a valid signature for blake_hash
 }
 
-#[cfg(not(feature: "blake_hash"))]
+#[cfg(feature: "poseidon_hash")]
+fn check_result(res: bool) { // TODO: generate a valid signature for poseidon_hash
+}
+
+#[cfg(and(not(feature: "blake_hash"), not(feature: "poseidon_hash")))]
 fn check_result(res: bool) {
     assert(res, 'invalid signature');
 }

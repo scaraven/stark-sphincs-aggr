@@ -43,6 +43,15 @@ pub fn hash_update(ref state: HashState, mut data: Span<u32>) {
     assert(data.is_empty(), 'unaligned poseidon block');
 }
 
+pub fn hash_finalize_block(ref state: HashState, data: [u32; 16]) -> [u32; 8] {
+    let updated_state = state.state.update_with(data);
+    state.byte_len += 64;
+
+    let out = updated_state.finalize();
+    // Convert felt252 to [u32; 8]
+    felt252_to_u32_array(out)
+}
+
 /// Finalizes the Poseidon hasher state and returns the hash.
 /// Follows the same process as the blake2s hasher for padding and finalization.
 pub fn hash_finalize(

@@ -16,6 +16,7 @@ cairo_test = "2.11.4"
 
 [features]
 default = []
+# Hash backend selection (enable at most one of these in a build):
 blake_hash = []
-sparse_addr = []
 poseidon_hash = []
+sparse_addr = []

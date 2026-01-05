@@ -61,6 +61,7 @@ pub fn wots_pk_from_sig(
         chain_idx += 0x100;
     }
 
+    // pk is of length 35?
     pk
 }
 

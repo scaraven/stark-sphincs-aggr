@@ -1,5 +1,5 @@
 [package]
-name = "sphincs_poseidon"
+name = "sphincs_plus"
 version = "0.1.0"
 edition = "2024_07"
 
@@ -9,7 +9,11 @@ edition = "2024_07"
 
 [dependencies]
 cairo_execute = "2.11.4"
-sphincs_plus = { path = "../sphincs-plus" }
+oracle = "0.1.0-dev.4"
 
 [dev-dependencies]
 cairo_test = "2.11.4"
+
+[features]
+default = []
+sparse_addr = []

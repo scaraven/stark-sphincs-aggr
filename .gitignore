@@ -1,2 +1,4 @@
 target/
-*.txt
+
+### Scarb.lock
+Scarb.lock

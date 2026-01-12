@@ -28,13 +28,13 @@ class BenchmarkRunner:
         self.results_dir = workspace_root / "benchmarks" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-    def build_sphincs(self, features: Optional[list[str]] = None) -> Dict[str, Any]:
+    def build_sphincs(self, package: str = "sphincs_plus", features: Optional[list[str]] = None) -> Dict[str, Any]:
         """Build SPHINCS+ package and extract compilation metrics."""
         print(f"\n{'='*60}")
-        print("Building SPHINCS+ package...")
+        print(f"Building {package} package...")
         print(f"{'='*60}")
         
-        cmd = ["scarb", "--profile", "release", "build", "--package", "sphincs_plus"]
+        cmd = ["scarb", "--profile", "release", "build", "--package", package]
         if features:
             cmd.extend(["--features", ",".join(features)])
         
@@ -57,6 +57,7 @@ class BenchmarkRunner:
         metrics = {
             "success": True,
             "build_time": build_time,
+            "package": package,
             "features": features or [],
             "stdout": result.stdout,
             "stderr": result.stderr
@@ -64,19 +65,24 @@ class BenchmarkRunner:
         
         return metrics
 
-    def execute_program(self, args_file: str) -> Dict[str, Any]:
+    def execute_program(self, args_file: str, package: str = "sphincs_plus") -> Dict[str, Any]:
         """Execute the Cairo program and extract resource usage."""
         print(f"\n{'='*60}")
-        print("Executing Cairo program...")
+        print(f"Executing {package} program...")
         print(f"{'='*60}")
         
         cmd = [
             "scarb", "--profile", "release", "execute",
             "--no-build",
-            "--package", "sphincs_plus",
+            "--package", package,
             "--print-resource-usage",
-            "--arguments-file", args_file
         ]
+        
+        # Exclude arguments file for sphincs_poseidon package
+        if package == "sphincs_poseidon":
+            print("Note: Skipping arguments file for sphincs_poseidon package")
+        else:
+            cmd.extend(["--arguments-file", args_file])
         
         start_time = time.time()
         result = subprocess.run(
@@ -96,15 +102,40 @@ class BenchmarkRunner:
         # Parse resource usage from output
         resource_usage = self._parse_resource_usage(result.stdout)
         
+        # Extract the raw resource usage section from output
+        resource_usage_raw = self._extract_resource_usage_raw(result.stdout)
+        
         metrics = {
             "success": True,
             "execution_time": execution_time,
             "resource_usage": resource_usage,
+            "resource_usage_raw": resource_usage_raw,
             "stdout": result.stdout,
             "stderr": result.stderr
         }
         
         return metrics
+
+    def _extract_resource_usage_raw(self, output: str) -> str:
+        """Extract the raw resource usage section from Cairo execution output."""
+        # Try to find resource usage section in the output
+        lines = output.split('\n')
+        resource_lines = []
+        in_resource_section = False
+        
+        for line in lines:
+            # Look for common resource usage indicators
+            if any(keyword in line.lower() for keyword in ['steps', 'memory', 'builtin', 'resource', 'n_steps', 'range_check', 'pedersen', 'bitwise', 'ec_op', 'poseidon']):
+                resource_lines.append(line)
+                in_resource_section = True
+            elif in_resource_section and line.strip() and not line.startswith(' '):
+                # End of resource section if we hit a non-indented line
+                if not any(keyword in line.lower() for keyword in ['steps', 'memory', 'builtin', 'resource']):
+                    in_resource_section = False
+            elif in_resource_section and line.strip():
+                resource_lines.append(line)
+        
+        return '\n'.join(resource_lines) if resource_lines else output
 
     def _parse_resource_usage(self, output: str) -> Dict[str, int]:
         """Parse resource usage from Cairo execution output."""
@@ -227,6 +258,7 @@ class BenchmarkRunner:
     def run_benchmark(
         self,
         name: str,
+        package: str = "sphincs_plus",
         features: Optional[list[str]] = None,
         args_file: Optional[str] = None,
         proving_task: Optional[str] = None,
@@ -235,26 +267,28 @@ class BenchmarkRunner:
         """Run a complete benchmark."""
         print(f"\n{'#'*60}")
         print(f"# Benchmark: {name}")
+        print(f"# Package: {package}")
         print(f"# Timestamp: {datetime.now().isoformat()}")
         print(f"{'#'*60}")
         
         benchmark_result = {
             "name": name,
             "timestamp": datetime.now().isoformat(),
+            "package": package,
             "features": features or [],
             "args_file": args_file,
         }
         
         # Step 1: Build
-        build_metrics = self.build_sphincs(features)
+        build_metrics = self.build_sphincs(package, features)
         benchmark_result["build"] = build_metrics
         
         if not build_metrics["success"]:
             return benchmark_result
         
-        # Step 2: Execute (if args file provided)
-        if args_file:
-            execution_metrics = self.execute_program(args_file)
+        # Step 2: Execute (if args file provided or sphincs_poseidon package)
+        if args_file or package == "sphincs_poseidon":
+            execution_metrics = self.execute_program(args_file, package)
             benchmark_result["execution"] = execution_metrics
             
             if not execution_metrics["success"]:
@@ -305,6 +339,7 @@ class BenchmarkRunner:
             f.write(f"SPHINCS+ STARK Benchmark Results\n")
             f.write(f"{'='*60}\n\n")
             f.write(f"Benchmark: {results['name']}\n")
+            f.write(f"Package: {results.get('package', 'sphincs_plus')}\n")
             f.write(f"Timestamp: {results['timestamp']}\n")
             f.write(f"Features: {', '.join(results['features']) if results['features'] else 'None'}\n")
             f.write(f"\n{'='*60}\n")
@@ -332,6 +367,14 @@ class BenchmarkRunner:
                     f.write(f"\nBuiltin Usage:\n")
                     for name, count in res['builtins'].items():
                         f.write(f"  {name}: {count:,}\n")
+                
+                # Include raw resource usage output
+                if 'resource_usage_raw' in results['execution'] and results['execution']['resource_usage_raw']:
+                    f.write(f"\n{'='*60}\n")
+                    f.write(f"RAW RESOURCE USAGE OUTPUT\n")
+                    f.write(f"{'='*60}\n")
+                    f.write(results['execution']['resource_usage_raw'])
+                    f.write("\n")
             
             # Proof metrics
             if 'proof' in results and results['proof']['success']:
@@ -360,6 +403,11 @@ def main():
     parser.add_argument(
         "--config",
         help="Path to benchmark configuration JSON file"
+    )
+    parser.add_argument(
+        "--package",
+        default="sphincs_plus",
+        help="Package to benchmark (e.g., sphincs_plus, sphincs_poseidon)"
     )
     parser.add_argument(
         "--features",
@@ -412,6 +460,7 @@ def main():
         for bench_config in config.get("benchmarks", []):
             result = runner.run_benchmark(
                 name=bench_config.get("name", "unnamed"),
+                package=bench_config.get("package", "sphincs_plus"),
                 features=bench_config.get("features"),
                 args_file=bench_config.get("args_file"),
                 proving_task=bench_config.get("proving_task") if not args.skip_proof else None,
@@ -426,6 +475,7 @@ def main():
         # Run single benchmark
         result = runner.run_benchmark(
             name=args.name,
+            package=args.package,
             features=args.features,
             args_file=args.args_file if not args.skip_execution else None,
             proving_task=args.proving_task if not args.skip_proof else None,

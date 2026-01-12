@@ -44,11 +44,13 @@ pub impl WotsSignatureDefault of Default<WotsSignature> {
 pub fn wots_pk_from_sig(
     ctx: SpxCtx, sig: WotsSignature, message: Array<u32>, address: @Address,
 ) -> Array<felt252> {
+
     let mut lengths = base_w_128s(message.span());
     add_checksum_128s(ref lengths);
 
     let mut sig_iter = sig.span();
     let mut lengths_iter = lengths.span();
+
     // Use 2nd LSB for chain id
     let mut chain_idx: u32 = 0;
     let mut pk = array![];

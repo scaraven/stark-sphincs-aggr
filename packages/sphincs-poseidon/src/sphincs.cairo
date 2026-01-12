@@ -52,6 +52,7 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
     // Compute the extended message digest which is `mhash || tree_idx || leaf_idx`.
     let digest = hash_message_128s(randomizer, pk_seed, pk_root, message, SPX_DGST_BYTES);
 
+
     // Split the digest into the message hash, tree address and leaf index.
     let XMessageDigest {
         mhash, mut tree_address, mut leaf_idx,
@@ -62,11 +63,14 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
     wots_addr.set_hypertree_addr(tree_address);
     wots_addr.set_keypair(leaf_idx);
 
+
     // Compute FORS public key (root) from the signature.
     let mut root = fors_pk_from_sig(ctx, fors_sig, mhash, @wots_addr);
 
+
     let mut layer: u8 = 0;
     let mut wots_merkle_sig_iter = wots_merkle_sig_list.span();
+
 
     while let Some(WotsMerkleSignature { wots_sig, auth_path }) = wots_merkle_sig_iter.pop_front() {
         tree_addr.set_hypertree_layer(layer);
@@ -79,10 +83,22 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
         let mut wots_pk_addr = wots_addr.clone();
         wots_pk_addr.set_address_type(AddressType::WOTSPK);
 
+
         // The WOTS public key is only correct if the signature was correct.
         // Initially, root is the FORS pk, but on subsequent iterations it is
         // the root of the subtree below the currently processed subtree.
-        let wots_pk = wots_pk_from_sig(ctx, *wots_sig, root, @wots_addr);
+
+        // Convert the root into an array of u32
+        let mut root_u32: u256 = root.into();
+        let mut root_u32_array: Array<u32> = array![];
+        // Split u256 into array of u32
+        for _ in 0..4_usize {
+            let (part, remainder) = DivRem::div_rem(root_u32, 0x100000000);
+            root_u32 = part;
+            root_u32_array.append(remainder.try_into().unwrap());
+        }
+        
+        let wots_pk = wots_pk_from_sig(ctx, *wots_sig, root_u32_array, @wots_addr);
 
         // Compute the leaf node using the WOTS public key.
         let leaf = thash_140(ctx, @wots_pk_addr, wots_pk.span());

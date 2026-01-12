@@ -3,12 +3,13 @@
 // SPDX-License-Identifier: MIT
 
 // Available hash functions.
+mod blake;
 mod poseidon;
 
 // Poseidon backend (arithmetic-friendly).
 pub use poseidon::hash_update_block;
 use poseidon::{
-    HashState, hash_finalize, hash_finalize_block, hash_init, hash_update,
+    HashState, hash_finalize_block, hash_init, hash_update,
 };
 
 use core::hash::HashStateTrait;
@@ -99,9 +100,23 @@ pub fn thash_56(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Hash
     panic!("thash_56: unexpected data length");
 }
 
+/// Convert a felt252 to an array of 4 u32s (little-endian).
+fn felt252_to_u32_array(value: felt252) -> Array<u32> {
+    let value_u256: u256 = value.into();
+    let mut result: Array<u32> = array![];
+    
+    result.append((value_u256 & 0xFFFFFFFF).try_into().unwrap());
+    result.append(((value_u256 / 0x100000000) & 0xFFFFFFFF).try_into().unwrap());
+    result.append(((value_u256 / 0x10000000000000000) & 0xFFFFFFFF).try_into().unwrap());
+    result.append(((value_u256 / 0x1000000000000000000000000) & 0xFFFFFFFF).try_into().unwrap());
+    
+    result
+}
+
 /// Hash a message using selected hash function.
 /// Returns the extended message digest of size SPX_DGST_BYTES as a [WordArray].
 /// NOTE: this is not a generic implementation, rather a shortcut for 128s.
+/// As Poseidon only returns field elements, we use blake hashing here instead.
 pub fn hash_message_128s(
     randomizer: HashOutput,
     pk_seed: HashOutput,
@@ -110,27 +125,27 @@ pub fn hash_message_128s(
     output_len: u32,
 ) -> WordArray {
     let mut data: Array<u32> = array![];
-    data.append_span(randomizer.span());
-    data.append_span(pk_seed.span());
-    data.append_span(pk_root.span());
+    data.append_span(felt252_to_u32_array(randomizer).span());
+    data.append_span(felt252_to_u32_array(pk_seed).span());
+    data.append_span(felt252_to_u32_array(pk_root).span());
 
     let (msg_words, msg_last_word, msg_last_word_len) = message.into_components();
     data.append_span(msg_words);
 
-    let mut state: HashState = Default::default();
-    hash_init(ref state);
+    let mut state: blake::HashState = Default::default();
+    blake::hash_init(ref state);
 
     // Compute the seed for XOF.
-    let seed = hash_finalize(state, data, msg_last_word, msg_last_word_len);
+    let seed = blake::hash_finalize(state, data, msg_last_word, msg_last_word_len);
 
     let mut xof_data: Array<u32> = array![];
-    xof_data.append_span(randomizer.span());
-    xof_data.append_span(pk_seed.span());
+    xof_data.append_span(felt252_to_u32_array(randomizer).span());
+    xof_data.append_span(felt252_to_u32_array(pk_seed).span());
     xof_data.append_span(seed.span());
     xof_data.append(0); // MGF1 counter = 0
 
     // Apply MGF1 to the seed.
-    let mut buffer = hash_finalize(state, xof_data.into(), 0, 0).span();
+    let mut buffer = blake::hash_finalize(state, xof_data, 0, 0).span();
 
     // Construct the digest from the extended output.
     // NOTE: we haven't cleared the LSB of the last word, has to be handled correctly.

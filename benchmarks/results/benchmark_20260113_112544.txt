@@ -1,0 +1,31 @@
+SPHINCS+ STARK Benchmark Results
+============================================================
+
+Benchmark: sphincs_benchmark
+Package: sphincs_plus
+Timestamp: 2026-01-13T11:22:51.083733
+Features: blake_hash
+
+============================================================
+SUMMARY
+============================================================
+
+Build Time: 2.44s
+Execution Time: 0.84s
+
+============================================================
+RAW RESOURCE USAGE OUTPUT
+============================================================
+Resources:
+	steps: 383,202
+	max memory address: 479,615
+	memory holes: 21,116
+	builtins:
+		range_check_builtin: 28,759
+	memory segments:
+		range_check: 28,759
+
+Prover Time: 170.33s
+Proof Size: 2,943,072 bytes (2874.09 KB)
+
+Total Time: 173.62s

@@ -28,13 +28,17 @@ class BenchmarkRunner:
         self.results_dir = workspace_root / "benchmarks" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-    def build_sphincs(self, package: str = "sphincs_plus", features: Optional[list[str]] = None) -> Dict[str, Any]:
+    def build_sphincs(self, package: str = "sphincs_plus", features: Optional[list[str]] = None, for_proving: bool = False) -> Dict[str, Any]:
         """Build SPHINCS+ package and extract compilation metrics."""
         print(f"\n{'='*60}")
         print(f"Building {package} package...")
         print(f"{'='*60}")
         
-        cmd = ["scarb", "--profile", "release", "build", "--package", package]
+        # Don't use release profile when building for proving - prover needs debug info
+        if for_proving:
+            cmd = ["scarb", "build", "--package", package]
+        else:
+            cmd = ["scarb", "--profile", "release", "build", "--package", package]
         if features:
             cmd.extend(["--features", ",".join(features)])
         
@@ -65,18 +69,27 @@ class BenchmarkRunner:
         
         return metrics
 
-    def execute_program(self, args_file: str, package: str = "sphincs_plus") -> Dict[str, Any]:
+    def execute_program(self, args_file: str, package: str = "sphincs_plus", for_proving: bool = False) -> Dict[str, Any]:
         """Execute the Cairo program and extract resource usage."""
         print(f"\n{'='*60}")
         print(f"Executing {package} program...")
         print(f"{'='*60}")
         
-        cmd = [
-            "scarb", "--profile", "release", "execute",
-            "--no-build",
-            "--package", package,
-            "--print-resource-usage",
-        ]
+        # Don't use release profile when building for proving - prover needs debug info
+        if for_proving:
+            cmd = [
+                "scarb", "execute",
+                "--no-build",
+                "--package", package,
+                "--print-resource-usage",
+            ]
+        else:
+            cmd = [
+                "scarb", "--profile", "release", "execute",
+                "--no-build",
+                "--package", package,
+                "--print-resource-usage",
+            ]
         
         # Exclude arguments file for sphincs_poseidon package
         if package == "sphincs_poseidon":
@@ -173,24 +186,43 @@ class BenchmarkRunner:
         
         return resources
 
-    def generate_proof(self, proving_task: str, prover_params: str) -> Dict[str, Any]:
-        """Generate STARK proof and measure time and size."""
+    def generate_proof(self, package: str = "sphincs_plus", args_file: Optional[str] = None) -> Dict[str, Any]:
+        """Generate STARK proof using stwo_run_and_prove and measure time and size."""
         print(f"\n{'='*60}")
         print("Generating STARK proof...")
         print(f"{'='*60}")
         
-        proof_name = f"proof_{int(time.time())}"
-        proof_path = self.target_dir / f"{proof_name}.proof"
+        # Build path to bootloader program
+        bootloader_path = self.workspace_root / "resources" / "simple_bootloader_compiled.json"
+        if not bootloader_path.exists():
+            return {"success": False, "error": f"Bootloader not found: {bootloader_path}"}
+        
+        # Build path to proving task for the package
+        package_dir_name = package.replace("_", "-")  # sphincs_plus -> sphincs-plus
+        proving_task_path = self.workspace_root / "packages" / package_dir_name / "proving_task.json"
+        if not proving_task_path.exists():
+            return {"success": False, "error": f"Proving task not found: {proving_task_path}"}
+        
+        # Create output directory for proof
+        proof_output_dir = self.target_dir / "execute" / package / "execution1" / "proof"
+        proof_output_dir.mkdir(parents=True, exist_ok=True)
+        proof_output_path = proof_output_dir / "proof.json"
+        
+        # Path to prover params
+        prover_params_path = self.workspace_root / "prover_params.json"
         
         cmd = [
             "stwo_run_and_prove",
-            "--program", str(self.workspace_root / "resources" / "simple_bootloader_compiled.json"),
-            "--program_input", proving_task,
-            "--prover_params_json", prover_params,
-            "--proof_path", str(proof_path),
+            "--program", str(bootloader_path.resolve()),
+            "--program_input", str(proving_task_path.resolve()),
+            "--proof_path", str(proof_output_path.resolve()),
             "--proof-format", "cairo-serde",
-            "--verify"
+            "--verify",
         ]
+        
+        # Add prover params if available
+        if prover_params_path.exists():
+            cmd.extend(["--prover_params_json", str(prover_params_path.resolve())])
         
         start_time = time.time()
         result = subprocess.run(
@@ -211,12 +243,10 @@ class BenchmarkRunner:
         prover_metrics = self._parse_prover_output(result.stdout + result.stderr)
         
         # Find and measure proof file
-        proof_files = list(self.target_dir.glob("*.proof"))
         proof_size = 0
         proof_file = None
-        if proof_files:
-            # Get the most recent proof file
-            proof_file = max(proof_files, key=lambda p: p.stat().st_mtime)
+        if proof_output_path.exists():
+            proof_file = proof_output_path
             proof_size = proof_file.stat().st_size
             print(f"✓ Proof size: {proof_size:,} bytes ({proof_size / 1024:.2f} KB)")
         
@@ -261,8 +291,7 @@ class BenchmarkRunner:
         package: str = "sphincs_plus",
         features: Optional[list[str]] = None,
         args_file: Optional[str] = None,
-        proving_task: Optional[str] = None,
-        prover_params: Optional[str] = None
+        run_proof: bool = False
     ) -> Dict[str, Any]:
         """Run a complete benchmark."""
         print(f"\n{'#'*60}")
@@ -279,8 +308,8 @@ class BenchmarkRunner:
             "args_file": args_file,
         }
         
-        # Step 1: Build
-        build_metrics = self.build_sphincs(package, features)
+        # Step 1: Build (without release profile if proving, to preserve debug info)
+        build_metrics = self.build_sphincs(package, features, for_proving=run_proof)
         benchmark_result["build"] = build_metrics
         
         if not build_metrics["success"]:
@@ -288,15 +317,15 @@ class BenchmarkRunner:
         
         # Step 2: Execute (if args file provided or sphincs_poseidon package)
         if args_file or package == "sphincs_poseidon":
-            execution_metrics = self.execute_program(args_file, package)
+            execution_metrics = self.execute_program(args_file, package, for_proving=run_proof)
             benchmark_result["execution"] = execution_metrics
             
             if not execution_metrics["success"]:
                 return benchmark_result
         
-        # Step 3: Generate proof (if proving task provided)
-        if proving_task and prover_params:
-            proof_metrics = self.generate_proof(proving_task, prover_params)
+        # Step 3: Generate proof (if requested)
+        if run_proof:
+            proof_metrics = self.generate_proof(package, args_file)
             benchmark_result["proof"] = proof_metrics
         
         # Calculate totals
@@ -420,16 +449,6 @@ def main():
         help="Path to arguments file for execution"
     )
     parser.add_argument(
-        "--proving-task",
-        default="packages/sphincs-plus/proving_task.json",
-        help="Path to proving task JSON file"
-    )
-    parser.add_argument(
-        "--prover-params",
-        default="prover_params.json",
-        help="Path to prover parameters JSON file"
-    )
-    parser.add_argument(
         "--output",
         help="Output file for results (default: auto-generated in benchmarks/results/)"
     )
@@ -442,6 +461,11 @@ def main():
         "--skip-proof",
         action="store_true",
         help="Skip proof generation step"
+    )
+    parser.add_argument(
+        "--prove",
+        action="store_true",
+        help="Generate STARK proof using stwo_run_and_prove"
     )
     
     args = parser.parse_args()
@@ -463,8 +487,7 @@ def main():
                 package=bench_config.get("package", "sphincs_plus"),
                 features=bench_config.get("features"),
                 args_file=bench_config.get("args_file"),
-                proving_task=bench_config.get("proving_task") if not args.skip_proof else None,
-                prover_params=bench_config.get("prover_params") if not args.skip_proof else None
+                run_proof=bench_config.get("run_proof", False) and not args.skip_proof
             )
             all_results.append(result)
         
@@ -478,8 +501,7 @@ def main():
             package=args.package,
             features=args.features,
             args_file=args.args_file if not args.skip_execution else None,
-            proving_task=args.proving_task if not args.skip_proof else None,
-            prover_params=args.prover_params if not args.skip_proof else None
+            run_proof=args.prove and not args.skip_proof
         )
         
         runner.save_results(result, args.output)

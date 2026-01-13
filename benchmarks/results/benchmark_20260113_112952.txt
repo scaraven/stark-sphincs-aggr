@@ -1,0 +1,37 @@
+SPHINCS+ STARK Benchmark Results
+============================================================
+
+Benchmark: sphincs_benchmark
+Package: sphincs_poseidon
+Timestamp: 2026-01-13T11:27:12.713857
+Features: None
+
+============================================================
+SUMMARY
+============================================================
+
+Build Time: 0.59s
+Execution Time: 1.05s
+
+============================================================
+RAW RESOURCE USAGE OUTPUT
+============================================================
+   Executing sphincs_poseidon
+Resources:
+	steps: 434,632
+	max memory address: 606,280
+	memory holes: 16,522
+	builtins:
+		range_check_builtin: 23,358
+		poseidon_builtin: 18,319
+		bitwise_builtin: 40
+	memory segments:
+		poseidon: 109,914
+		range_check: 23,358
+		bitwise: 200
+Saving output to: target/execute/sphincs_poseidon/execution3
+
+Prover Time: 158.49s
+Proof Size: 2,943,072 bytes (2874.09 KB)
+
+Total Time: 160.13s

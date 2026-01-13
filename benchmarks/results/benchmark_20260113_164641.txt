@@ -1,0 +1,33 @@
+SPHINCS+ STARK Benchmark Results
+============================================================
+
+Benchmark: sphincs_btc_grinding
+Package: sphincs_btc
+Timestamp: 2026-01-13T16:45:40.754966
+Features: None
+
+============================================================
+SUMMARY
+============================================================
+
+Build Time: 2.86s
+Execution Time: 0.37s
+
+============================================================
+RAW RESOURCE USAGE OUTPUT
+============================================================
+Resources:
+	steps: 209,815
+	max memory address: 238,776
+	memory holes: 11,477
+	builtins:
+		range_check_builtin: 13,325
+		bitwise_builtin: 10
+	memory segments:
+		range_check: 13,325
+		bitwise: 50
+
+Prover Time: 57.64s
+Proof Size: 2,727,648 bytes (2663.72 KB)
+
+Total Time: 60.86s

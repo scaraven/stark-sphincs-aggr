@@ -28,17 +28,13 @@ class BenchmarkRunner:
         self.results_dir = workspace_root / "benchmarks" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-    def build_sphincs(self, package: str = "sphincs_plus", features: Optional[list[str]] = None, for_proving: bool = False) -> Dict[str, Any]:
+    def build_sphincs(self, package: str = "sphincs_plus", features: Optional[list[str]] = None) -> Dict[str, Any]:
         """Build SPHINCS+ package and extract compilation metrics."""
         print(f"\n{'='*60}")
         print(f"Building {package} package...")
         print(f"{'='*60}")
         
-        # Don't use release profile when building for proving - prover needs debug info
-        if for_proving:
-            cmd = ["scarb", "build", "--package", package]
-        else:
-            cmd = ["scarb", "--profile", "release", "build", "--package", package]
+        cmd = ["scarb", "--profile", "release", "build", "--package", package]
         if features:
             cmd.extend(["--features", ",".join(features)])
         
@@ -69,27 +65,18 @@ class BenchmarkRunner:
         
         return metrics
 
-    def execute_program(self, args_file: str, package: str = "sphincs_plus", for_proving: bool = False) -> Dict[str, Any]:
+    def execute_program(self, args_file: str, package: str = "sphincs_plus") -> Dict[str, Any]:
         """Execute the Cairo program and extract resource usage."""
         print(f"\n{'='*60}")
         print(f"Executing {package} program...")
         print(f"{'='*60}")
         
-        # Don't use release profile when building for proving - prover needs debug info
-        if for_proving:
-            cmd = [
-                "scarb", "execute",
-                "--no-build",
-                "--package", package,
-                "--print-resource-usage",
-            ]
-        else:
-            cmd = [
-                "scarb", "--profile", "release", "execute",
-                "--no-build",
-                "--package", package,
-                "--print-resource-usage",
-            ]
+        cmd = [
+            "scarb", "--profile", "release", "execute",
+            "--no-build",
+            "--package", package,
+            "--print-resource-usage",
+        ]
         
         # Exclude arguments file for sphincs_poseidon package
         if package == "sphincs_poseidon":
@@ -308,8 +295,8 @@ class BenchmarkRunner:
             "args_file": args_file,
         }
         
-        # Step 1: Build (without release profile if proving, to preserve debug info)
-        build_metrics = self.build_sphincs(package, features, for_proving=run_proof)
+        # Step 1: Build
+        build_metrics = self.build_sphincs(package, features)
         benchmark_result["build"] = build_metrics
         
         if not build_metrics["success"]:
@@ -317,7 +304,7 @@ class BenchmarkRunner:
         
         # Step 2: Execute (if args file provided or sphincs_poseidon package)
         if args_file or package == "sphincs_poseidon":
-            execution_metrics = self.execute_program(args_file, package, for_proving=run_proof)
+            execution_metrics = self.execute_program(args_file, package)
             benchmark_result["execution"] = execution_metrics
             
             if not execution_metrics["success"]:

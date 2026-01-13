@@ -63,3 +63,39 @@ sphincs-prove:
 		--proofs_dir $(TARGET_DIR) \
 		--proof-format cairo-serde \
 		--verify
+
+# Bitcoin-optimized SPHINCS+ with Blake2s (STARK-optimized)
+sphincs-btc-build:
+	scarb --profile release build --package sphincs_btc
+
+sphincs-btc-build-debug:
+	scarb --profile release build --package sphincs_btc --features debug
+
+sphincs-btc-args:
+	python3 packages/sphincs-btc/scripts/generate_args.py 2>/dev/null > packages/sphincs-btc/tests/data/test_vector.json
+
+sphincs-btc-execute: sphincs-btc-build
+	rm -rf $(TARGET_DIR)/execute/sphincs_btc
+	scarb --profile release execute \
+		--no-build \
+		--package sphincs_btc \
+		--print-resource-usage \
+		--arguments-file packages/sphincs-btc/tests/data/test_vector.json
+
+sphincs-btc-execute-debug: sphincs-btc-build-debug
+	rm -rf $(TARGET_DIR)/execute/sphincs_btc
+	scarb --profile release execute \
+		--no-build \
+		--package sphincs_btc \
+		--features debug \
+		--print-resource-usage \
+		--arguments-file packages/sphincs-btc/tests/data/test_vector.json
+
+sphincs-btc-prove: sphincs-btc-build
+	stwo_run_and_prove \
+		--program resources/simple_bootloader_compiled.json \
+		--program_input packages/sphincs-btc/proving_task.json \
+		--prover_params_json prover_params.json \
+		--proofs_dir $(TARGET_DIR) \
+		--proof-format cairo-serde \
+		--verify

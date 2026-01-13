@@ -1,0 +1,16 @@
+{
+    "bootloader_input": {
+        "packed_outputs": [],
+        "simple_bootloader_input": {
+            "fact_topologies_path": null,
+            "single_page": true,
+            "tasks": [
+                {
+                    "type": "ExecuteProgramPath",
+                    "path": "target/release/sphincs_btc.executable.json",
+                    "args_path": "packages/sphincs-btc/tests/data/test_vector.json"
+                }
+            ]
+        }
+    }
+}

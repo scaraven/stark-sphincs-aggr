@@ -2,3 +2,6 @@ target/
 
 ### Scarb.lock
 Scarb.lock
+context/
+node_modules/
+misc/

@@ -12,6 +12,8 @@
 //! - w=256 (Winternitz parameter)
 //! - n=16 (hash output bytes)
 
+use crate::main;
+use crate::WordArray;
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, ForsSignatureSerde, fors_pk_from_sig};
 use crate::hasher::{
@@ -130,6 +132,31 @@ pub fn verify_btc(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKey
     root == pk_root
 }
 
+/// Verify multiple SPHINCS+ signatures in batch.
+/// Returns true if ALL signatures are valid, false if ANY signature is invalid.
+pub fn verify_btc_batch(
+    sig_msg_pairs: Span<(SphincsSignature, WordArray)>,
+    pk: SphincsPublicKey
+) -> bool {
+    let mut iter = sig_msg_pairs;
+    let mut all_valid = true;
+    let mut idx = 0;
+    
+    for (sig, message) in iter {
+        debug_print_batch_start(idx);
+        let valid = verify_btc(message.span(), *sig, pk);
+        if !valid {
+            debug_print_batch_fail(idx);
+            all_valid = false;
+        } else {
+            debug_print_batch_success(idx);
+        }
+        idx += 1;
+    };
+    
+    all_valid
+}
+
 // Debug helper functions - only active when debug feature is enabled
 #[cfg(feature: "debug")]
 fn debug_print_header(tree_address: u32, leaf_idx: u8) {
@@ -195,6 +222,30 @@ fn debug_print_final(root: HashOutput, pk_root: HashOutput) {
 
 #[cfg(not(feature: "debug"))]
 fn debug_print_final(_root: HashOutput, _pk_root: HashOutput) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_batch_start(idx: u32) {
+    println!("\n=== Verifying Signature {} ===", idx);
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_batch_start(_idx: u32) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_batch_success(idx: u32) {
+    println!("✓ Signature {} valid", idx);
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_batch_success(_idx: u32) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_batch_fail(idx: u32) {
+    println!("✗ Signature {} INVALID", idx);
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_batch_fail(_idx: u32) {}
 
 /// Split the extended message digest into components.
 /// For BTC params: mhash (18 bytes) || tree_addr (3 bytes) || leaf_idx (1 byte)

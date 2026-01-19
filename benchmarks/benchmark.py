@@ -354,56 +354,74 @@ class BenchmarkRunner:
         with open(output_file, 'w') as f:
             f.write(f"SPHINCS+ STARK Benchmark Results\n")
             f.write(f"{'='*60}\n\n")
-            f.write(f"Benchmark: {results['name']}\n")
-            f.write(f"Package: {results.get('package', 'sphincs_plus')}\n")
-            f.write(f"Timestamp: {results['timestamp']}\n")
-            f.write(f"Features: {', '.join(results['features']) if results['features'] else 'None'}\n")
-            f.write(f"\n{'='*60}\n")
-            f.write(f"SUMMARY\n")
-            f.write(f"{'='*60}\n\n")
             
-            # Build metrics
-            if results['build']['success']:
-                f.write(f"Build Time: {results['build']['build_time']:.2f}s\n")
-            
-            # Execution metrics
-            if 'execution' in results and results['execution']['success']:
-                f.write(f"Execution Time: {results['execution']['execution_time']:.2f}s\n")
+            # Check if this is a multi-benchmark result (from config file)
+            if 'benchmarks' in results:
+                # Handle multiple benchmarks
+                f.write(f"Multiple Benchmarks Run\n")
+                f.write(f"Total Benchmarks: {len(results['benchmarks'])}\n\n")
                 
-                res = results['execution']['resource_usage']
-                if 'n_steps' in res or 'steps' in res:
-                    steps = res.get('n_steps', res.get('steps', 0))
-                    f.write(f"Cairo Steps: {steps:,}\n")
-                
-                if 'n_memory_holes' in res or 'memory_holes' in res:
-                    holes = res.get('n_memory_holes', res.get('memory_holes', 0))
-                    f.write(f"Memory Holes: {holes:,}\n")
-                
-                if 'builtins' in res:
-                    f.write(f"\nBuiltin Usage:\n")
-                    for name, count in res['builtins'].items():
-                        f.write(f"  {name}: {count:,}\n")
-                
-                # Include raw resource usage output
-                if 'resource_usage_raw' in results['execution'] and results['execution']['resource_usage_raw']:
+                for i, bench_result in enumerate(results['benchmarks'], 1):
                     f.write(f"\n{'='*60}\n")
-                    f.write(f"RAW RESOURCE USAGE OUTPUT\n")
-                    f.write(f"{'='*60}\n")
-                    f.write(results['execution']['resource_usage_raw'])
-                    f.write("\n")
+                    f.write(f"BENCHMARK {i}: {bench_result['name']}\n")
+                    f.write(f"{'='*60}\n\n")
+                    self._write_single_benchmark_summary(f, bench_result)
+            else:
+                # Handle single benchmark
+                f.write(f"Benchmark: {results['name']}\n")
+                f.write(f"Package: {results.get('package', 'sphincs_plus')}\n")
+                f.write(f"Timestamp: {results['timestamp']}\n")
+                f.write(f"Features: {', '.join(results['features']) if results['features'] else 'None'}\n")
+                f.write(f"\n{'='*60}\n")
+                f.write(f"SUMMARY\n")
+                f.write(f"{'='*60}\n\n")
+                self._write_single_benchmark_summary(f, results)
+    
+    def _write_single_benchmark_summary(self, f, results: Dict[str, Any]):
+        """Write summary for a single benchmark result."""
+        # Build metrics
+        if 'build' in results and results['build']['success']:
+            f.write(f"Build Time: {results['build']['build_time']:.2f}s\n")
+        
+        # Execution metrics
+        if 'execution' in results and results['execution']['success']:
+            f.write(f"Execution Time: {results['execution']['execution_time']:.2f}s\n")
             
-            # Proof metrics
-            if 'proof' in results and results['proof']['success']:
-                f.write(f"\nProver Time: {results['proof']['prover_time']:.2f}s\n")
-                f.write(f"Proof Size: {results['proof']['proof_size_bytes']:,} bytes ")
-                f.write(f"({results['proof']['proof_size_kb']:.2f} KB)\n")
-                
-                if results['proof']['prover_metrics']:
-                    f.write(f"\nProver Metrics:\n")
-                    for key, value in results['proof']['prover_metrics'].items():
-                        f.write(f"  {key}: {value:,}\n")
+            res = results['execution']['resource_usage']
+            if 'n_steps' in res or 'steps' in res:
+                steps = res.get('n_steps', res.get('steps', 0))
+                f.write(f"Cairo Steps: {steps:,}\n")
             
-            # Total
+            if 'n_memory_holes' in res or 'memory_holes' in res:
+                holes = res.get('n_memory_holes', res.get('memory_holes', 0))
+                f.write(f"Memory Holes: {holes:,}\n")
+            
+            if 'builtins' in res:
+                f.write(f"\nBuiltin Usage:\n")
+                for name, count in res['builtins'].items():
+                    f.write(f"  {name}: {count:,}\n")
+            
+            # Include raw resource usage output
+            if 'resource_usage_raw' in results['execution'] and results['execution']['resource_usage_raw']:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"RAW RESOURCE USAGE OUTPUT\n")
+                f.write(f"{'='*60}\n")
+                f.write(results['execution']['resource_usage_raw'])
+                f.write("\n")
+        
+        # Proof metrics
+        if 'proof' in results and results['proof']['success']:
+            f.write(f"\nProver Time: {results['proof']['prover_time']:.2f}s\n")
+            f.write(f"Proof Size: {results['proof']['proof_size_bytes']:,} bytes ")
+            f.write(f"({results['proof']['proof_size_kb']:.2f} KB)\n")
+            
+            if results['proof']['prover_metrics']:
+                f.write(f"\nProver Metrics:\n")
+                for key, value in results['proof']['prover_metrics'].items():
+                    f.write(f"  {key}: {value:,}\n")
+        
+        # Total
+        if 'total_time' in results:
             f.write(f"\nTotal Time: {results['total_time']:.2f}s\n")
 
 

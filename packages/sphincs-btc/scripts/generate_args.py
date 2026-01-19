@@ -38,8 +38,46 @@ SPX_DGST_BYTES = 22  # mhash(18) + tree_addr(3) + leaf_idx(1)
 
 
 def blake2s_raw(data: bytes) -> bytes:
-    """Standard Blake2s-256."""
-    return hashlib.blake2s(data, digest_size=32).digest()
+    """
+    Blake2s-256 matching Cairo's implementation.
+    
+    Formats input data to match Cairo's padding and chunking behavior,
+    then uses standard blake2s as a black box.
+    """
+    # Convert bytes to u32 words (little-endian to match Cairo)
+    full_words = len(data) // 4
+    remaining_bytes = len(data) % 4
+
+    hasher = hashlib.blake2s(digest_size=32)
+
+    words = []
+    
+    # Add all full words
+    for i in range(full_words):
+        word = struct.unpack("<I", data[i*4:(i+1)*4])[0]
+        words.append(word)
+    
+    # Handle partial last word (Cairo's padding logic)
+    if remaining_bytes > 0:
+        last_bytes = data[full_words*4:]
+        # Pack bytes and shift to high-order position
+        last_word = 0
+        for b in last_bytes:
+            last_word = (last_word << 8) | b
+        
+        # Cairo shifts based on remaining bytes
+        if remaining_bytes == 1:
+            last_word = last_word * 0x1000000  # Shift to highest byte
+        elif remaining_bytes == 2:
+            last_word = last_word * 0x10000    # Shift to high 2 bytes
+        elif remaining_bytes == 3:
+            last_word = last_word * 0x100      # Shift to high 3 bytes
+        
+        words.append(last_word)
+
+    padded_data = b''.join(struct.pack("<I", w) for w in words)
+    hasher.update(padded_data)
+    return hasher.digest()
 
 
 class Address:
@@ -468,13 +506,13 @@ def split_digest(digest: bytes) -> tuple:
 
 
 def bytes_to_u32s(data: bytes) -> list:
-    """Convert bytes to list of u32 values (big-endian)."""
+    """Convert bytes to list of u32 values (little-endian to match Cairo)."""
     result = []
     for i in range(0, len(data), 4):
         chunk = data[i:i+4]
         if len(chunk) < 4:
             chunk = chunk + b'\x00' * (4 - len(chunk))
-        result.append(struct.unpack(">I", chunk)[0])
+        result.append(struct.unpack("<I", chunk)[0])  # Little-endian to match Cairo
     return result
 
 

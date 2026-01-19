@@ -67,7 +67,7 @@ pub fn hash_finalize(
     } else if last_input_num_bytes == 3 {
         buffer.append(last_input_word * 0x100);
     }
-
+    
     state.byte_len += buffer.len() * 4;
 
     for _ in buffer.len()..16 {
@@ -77,4 +77,38 @@ pub fn hash_finalize(
     let msg = buffer.span().try_into().expect('Cast to @Blake2sInput failed');
     let res = blake2s_finalize(state.h, state.byte_len, *msg);
     res.unbox()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_finalize() {
+        let data: Array<u32> = array![];
+        let mut state: HashState = Default::default();
+        hash_init(ref state);
+        let hash_output = hash_finalize(state, data, 0x636261, 3);
+        let expected: [u32; 8] = [
+            2131632358, 110309861, 1074860180, 3623593991, 3348744755, 1273215151, 3698340154, 4033336807,
+        ];
+        assert(hash_output == expected, 'Blake2s hash mismatch');
+
+        let seq = array![0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c];
+        let mut state: HashState = Default::default();
+        hash_init(ref state);
+        let hash_output = hash_finalize(state, seq, 0, 0);
+        let expected: [u32; 8] = [
+            3696017647, 2440961081, 1714994457, 1699632010, 1828925950, 772891242, 300673860, 2154874361
+        ];
+
+        assert(hash_output == expected, 'Blake2s hash mismatch');
+
+        let seq: Array<u32> = array![];
+        let mut state: HashState = Default::default();
+        hash_init(ref state);
+        let hash_output = hash_finalize(state, seq, 0, 0);
+        let expected: [u32; 8] = [813310313, 2491453561, 3491828193, 2085238082, 1219908895, 514171180, 4245497115, 4193177630];
+        assert(hash_output == expected, 'Blake2s hash mismatch');
+    }
 }

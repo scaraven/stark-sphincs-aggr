@@ -232,7 +232,7 @@ fn debug_print_batch_start(_idx: u32) {}
 
 #[cfg(feature: "debug")]
 fn debug_print_batch_success(idx: u32) {
-    println!("✓ Signature {} valid", idx);
+    println!("Signature {} valid", idx);
 }
 
 #[cfg(not(feature: "debug"))]
@@ -240,7 +240,7 @@ fn debug_print_batch_success(_idx: u32) {}
 
 #[cfg(feature: "debug")]
 fn debug_print_batch_fail(idx: u32) {
-    println!("✗ Signature {} INVALID", idx);
+    println!("Signature {} INVALID", idx);
 }
 
 #[cfg(not(feature: "debug"))]

@@ -302,7 +302,7 @@ def main():
         help='Number of signatures to benchmark'
     )
     parser.add_argument(
-        '--seeds',
+        '--seed',
         type=int,
         default=0,
         help='RNG seed to test (default: 0)'
@@ -327,7 +327,7 @@ def main():
     # Run benchmark sweep
     results = runner.run_sweep(
         sig_counts=args.num_signatures,
-        seeds=args.seeds,
+        seed=args.seed,
         message_prefix=args.message_prefix
     )
     

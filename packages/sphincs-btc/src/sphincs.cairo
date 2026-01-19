@@ -12,7 +12,6 @@
 //! - w=256 (Winternitz parameter)
 //! - n=16 (hash output bytes)
 
-use crate::main;
 use crate::WordArray;
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, ForsSignatureSerde, fors_pk_from_sig};

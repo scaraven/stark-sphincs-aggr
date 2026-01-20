@@ -50,13 +50,14 @@ pub fn hash_update(ref state: HashState, mut data: Span<u32>) {
 pub fn hash_finalize(
     mut state: HashState, input: Array<u32>, last_input_word: u32, last_input_num_bytes: u32,
 ) -> [u32; 8] {
+    println!("hash_finalize input: {:?}, last_input_word: {}, last_input_num_bytes: {}", input, last_input_word, last_input_num_bytes);
     let mut data = input.span();
 
-    print!("Final Blake2s block: {:?}", data);
+    let mut h = state.h;
 
     while let Some(chunk) = data.multi_pop_front::<16>() {
         state.byte_len += 64;
-        blake2s_compress(state.h, state.byte_len, *chunk);
+        h = blake2s_compress(h, state.byte_len, *chunk);
     }
 
     let mut buffer: Array<u32> = array![];
@@ -76,10 +77,8 @@ pub fn hash_finalize(
         buffer.append(0);
     }
 
-    println!(", padded final block: {:?}", buffer.span());
-
     let msg = buffer.span().try_into().expect('Cast to @Blake2sInput failed');
-    let res = blake2s_finalize(state.h, state.byte_len, *msg);
+    let res = blake2s_finalize(h, state.byte_len, *msg);
     res.unbox()
 }
 
@@ -96,7 +95,7 @@ mod tests {
         let expected: [u32; 8] = [
             2131632358, 110309861, 1074860180, 3623593991, 3348744755, 1273215151, 3698340154, 4033336807,
         ];
-        assert(hash_output == expected, 'Blake2s hash mismatch');
+        assert_eq!(hash_output, expected, "Blake2s hash mismatch");
 
         let seq = array![0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c];
         let mut state: HashState = Default::default();
@@ -106,13 +105,13 @@ mod tests {
             3696017647, 2440961081, 1714994457, 1699632010, 1828925950, 772891242, 300673860, 2154874361
         ];
 
-        assert(hash_output == expected, 'Blake2s hash mismatch');
+        assert_eq!(hash_output, expected, "Blake2s hash mismatch");
 
         let seq: Array<u32> = array![];
         let mut state: HashState = Default::default();
         hash_init(ref state);
         let hash_output = hash_finalize(state, seq, 0, 0);
         let expected: [u32; 8] = [813310313, 2491453561, 3491828193, 2085238082, 1219908895, 514171180, 4245497115, 4193177630];
-        assert(hash_output == expected, 'Blake2s hash mismatch');
+        assert_eq!(hash_output, expected, "Blake2s hash mismatch");
     }
 }

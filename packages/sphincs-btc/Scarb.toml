@@ -10,8 +10,9 @@ name = "main_multi"
 function = "sphincs_btc::main_multi"
 
 [[target.executable]]
-name = "test_consistency"
-function = "sphincs_btc::test_consistency"
+name = "main"
+function = "sphincs_btc::main"
+
 
 [dependencies]
 cairo_execute = "2.11.4"

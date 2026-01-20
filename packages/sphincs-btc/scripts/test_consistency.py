@@ -33,13 +33,12 @@ def test_blake2s_basic():
     # Test vectors
     test_inputs = [
         b"",  # Empty
-        b"cba",  # Simple
+        b"abc",  # Simple
         bytes(range(16)),  # 16 bytes sequence
     ]
     
     for i, data in enumerate(test_inputs):
-        hasher = hashlib.blake2s(digest_size=32)
-        h = blake2s_raw(data, hasher)
+        h = blake2s_raw(data)
         print(f"\nTest {i+1}:")
         print(f"  Input: {data.hex() if len(data) <= 32 else data[:32].hex() + '...'}")
         print(f"  Input length: {len(data)} bytes")
@@ -71,16 +70,12 @@ def test_thash():
         ("Complex", lambda a: (a.set_layer(2), a.set_tree_addr(0xABC), 
                               a.set_type(Address.HASHTREE), a.set_keypair(5))),
     ]
-
-    hasher = hashlib.blake2s(digest_size=32)
-    padded_seed = pk_seed + b'\x00' * (64 - SPX_N)
-    hasher.update(padded_seed)
     
     for name, setup_fn in test_cases:
         addr = Address()
         setup_fn(addr)
         
-        result = thash(hasher, addr, test_data)
+        result = thash(pk_seed, addr, test_data)
         
         print(f"\n{name}:")
         print(f"  pk_seed: {pk_seed.hex()}")

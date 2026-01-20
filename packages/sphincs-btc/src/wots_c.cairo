@@ -16,7 +16,6 @@ use crate::params_btc::{SPX_WOTS_C_LEN, SPX_WOTS_C_OMIT};
 
 #[cfg(feature: "debug")]
 fn debug_print_wots_c(modified_message: HashOutput, sum: u32, digits: @Array<u32>) {
-    let len = digits.len();
     let d14 = *digits[14];
     let d15 = *digits[15];
     println!("    modified_msg: {}", crate::hasher::to_hex(modified_message.span()));

@@ -160,3 +160,49 @@ pub fn to_hex(data: Span<u32>) -> ByteArray {
     let word_span = WordSpanTrait::new(data, 0, 0);
     crate::word_array::hex::words_to_hex(word_span)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::address::AddressType;
+
+#[test]
+    fn test_thash_btc() {
+        // Use deterministic seeds: 0x00, 0x01, ..., 0x0f (in big-endian)
+        let pk_seed: HashOutput = [0x00010203, 0x04050607, 0x08090a0b, 0x0c0d0e0f];
+
+        let test_data = array![0x10111213, 0x14151617, 0x18191a1b, 0x1c1d1e1f];
+    
+        let ctx = initialize_hash_function(pk_seed);
+
+        let mut addr: Address = Default::default();
+
+        let result = thash_btc(ctx, @addr, test_data.span());
+        println!("thash_btc output: {}", to_hex(result.span()));
+        assert_eq!(result, [3244308000, 1439338620, 170711974, 1165227932]);
+
+        let ctx = initialize_hash_function(pk_seed);
+        addr.set_hypertree_layer(1);
+        let result = thash_btc(ctx, @addr, test_data.span());
+        assert_eq!(result, [2980436067, 1337876336, 607666656, 25797468]);
+
+        let ctx = initialize_hash_function(pk_seed);
+        addr = Default::default();
+        addr.set_hypertree_addr(0x123);
+
+        let result = thash_btc(ctx, @addr, test_data.span());
+        assert_eq!(result, [1723354829, 4060091269, 908552801, 4065590746]);
+
+        let ctx = initialize_hash_function(pk_seed);
+        addr = Default::default();
+        addr.set_hypertree_layer(2);
+        addr.set_hypertree_addr(0xABC);
+        addr.set_address_type(AddressType::HASHTREE);
+        addr.set_keypair(5);
+        let result = thash_btc(ctx, @addr, test_data.span());
+
+        assert_eq!(result, [273953575, 3137967400, 575964652, 3828154744]);
+
+    }
+}

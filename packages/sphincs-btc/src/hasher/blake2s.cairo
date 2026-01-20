@@ -50,7 +50,6 @@ pub fn hash_update(ref state: HashState, mut data: Span<u32>) {
 pub fn hash_finalize(
     mut state: HashState, input: Array<u32>, last_input_word: u32, last_input_num_bytes: u32,
 ) -> [u32; 8] {
-    println!("hash_finalize input: {:?}, last_input_word: {}, last_input_num_bytes: {}", input, last_input_word, last_input_num_bytes);
     let mut data = input.span();
 
     let mut h = state.h;

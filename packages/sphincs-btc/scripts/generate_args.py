@@ -37,7 +37,7 @@ SPX_WOTS_TARGET_SUM = 2040
 SPX_DGST_BYTES = 22  # mhash(18) + tree_addr(3) + leaf_idx(1)
 
 
-def blake2s_raw(data: bytes) -> bytes:
+def blake2s_raw(data: bytes, hasher: hashlib.blake2s) -> bytes:
     """
     Blake2s-256 matching Cairo's implementation.
     
@@ -47,8 +47,6 @@ def blake2s_raw(data: bytes) -> bytes:
     # Convert bytes to u32 words (little-endian to match Cairo)
     full_words = len(data) // 4
     remaining_bytes = len(data) % 4
-
-    hasher = hashlib.blake2s(digest_size=32)
 
     words = []
     
@@ -76,6 +74,7 @@ def blake2s_raw(data: bytes) -> bytes:
         words.append(last_word)
 
     padded_data = b''.join(struct.pack("<I", w) for w in words)
+    print(padded_data)
     hasher.update(padded_data)
     return hasher.digest()
 
@@ -190,7 +189,7 @@ class Address:
         return result
 
 
-def thash(pk_seed: bytes, address: Address, input_data: bytes) -> bytes:
+def thash(hasher: hashlib.blake2s, address: Address, input_data: bytes) -> bytes:
     """
     Tweakable hash matching Cairo's thash_btc.
 
@@ -201,9 +200,10 @@ def thash(pk_seed: bytes, address: Address, input_data: bytes) -> bytes:
     Equivalent to: Blake2s(pk_seed || zeros_48 || address || input)[0:16]
     """
     # Build the full input: pk_seed padded to 64 bytes + address + input
-    padded_seed = pk_seed + b'\x00' * (64 - SPX_N)
-    data = padded_seed + address.to_bytes() + input_data
-    h = blake2s_raw(data)
+    data = address.to_bytes() + input_data
+    # Print input data as hex
+    print("thash input data:", data.hex())
+    h = blake2s_raw(data, hasher)
     return h[:SPX_N]
 
 

@@ -5,7 +5,13 @@ edition = "2024_07"
 
 [lib]
 
-[executable]
+[[target.executable]]
+name = "main_multi"
+function = "sphincs_btc::main_multi"
+
+[[target.executable]]
+name = "test_consistency"
+function = "sphincs_btc::test_consistency"
 
 [dependencies]
 cairo_execute = "2.11.4"

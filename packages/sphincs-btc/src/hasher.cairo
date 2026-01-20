@@ -42,7 +42,11 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
 pub fn thash_btc(ctx: SpxCtx, address: @Address, input: Span<u32>) -> HashOutput {
     let mut buffer = address.to_word_array();
     buffer.append_u32_span(input);
+
+    println!("thash_btc input buffer before finalize: {:?}", crate::word_array::hex::words_to_hex(buffer.span()));
     let (words, last_word, last_word_len) = buffer.into_components();
+    println!("thash_btc input words: {:?}, last_word: {:?}, last_word_len: {:?}", words, last_word, last_word_len);
+
     let [d0, d1, d2, d3, _, _, _, _] = hash_finalize(
         ctx.state_seeded, words, last_word, last_word_len,
     );

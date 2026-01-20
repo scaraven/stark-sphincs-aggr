@@ -18,7 +18,7 @@ pub struct HashState {
 
 impl HashStateDefault of Default<HashState> {
     fn default() -> HashState {
-        HashState { h: BoxImpl::new([0; 8]), byte_len: 0 }
+        HashState { h: BoxImpl::new(BLAKE2S_256_IV), byte_len: 0 }
     }
 }
 
@@ -52,6 +52,8 @@ pub fn hash_finalize(
 ) -> [u32; 8] {
     let mut data = input.span();
 
+    print!("Final Blake2s block: {:?}", data);
+
     while let Some(chunk) = data.multi_pop_front::<16>() {
         state.byte_len += 64;
         blake2s_compress(state.h, state.byte_len, *chunk);
@@ -73,6 +75,8 @@ pub fn hash_finalize(
     for _ in buffer.len()..16 {
         buffer.append(0);
     }
+
+    println!(", padded final block: {:?}", buffer.span());
 
     let msg = buffer.span().try_into().expect('Cast to @Blake2sInput failed');
     let res = blake2s_finalize(state.h, state.byte_len, *msg);

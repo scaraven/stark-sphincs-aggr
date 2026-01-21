@@ -55,12 +55,12 @@ fn main_multi(args: MultiSigArgs) {
     check_result(res);
 }
 
-#[cfg(or(feature: "blake_hash", feature: "debug"))]
+#[cfg(feature:  "debug")]
 fn check_result(_res: bool) {
-    // Skip signature verification in blake_hash or debug mode
+    println!("Verification result: {}", _res);
 }
 
-#[cfg(not(or(feature: "blake_hash", feature: "debug")))]
+#[cfg(not(feature: "debug"))]
 fn check_result(res: bool) {
     assert(res, 'invalid signature');
 }

@@ -17,6 +17,7 @@ Parameters:
 """
 
 import hashlib
+import os
 import struct
 import json
 import sys
@@ -37,14 +38,14 @@ SPX_WOTS_TARGET_SUM = 2040
 SPX_DGST_BYTES = 22  # mhash(18) + tree_addr(3) + leaf_idx(1)
 
 
-def blake2s_raw(data: bytes) -> bytes:
+def blake2s_raw(data: bytes, print_debug=False) -> bytes:
     """
     Blake2s-256 matching Cairo's implementation.
     
     Formats input data to match Cairo's padding and chunking behavior,
     then uses standard blake2s as a black box.
     """
-    # Convert bytes to u32 words (little-endian to match Cairo)
+    # Convert bytes to u32 words
     full_words = len(data) // 4
     remaining_bytes = len(data) % 4
 
@@ -76,9 +77,19 @@ def blake2s_raw(data: bytes) -> bytes:
         words.append(last_word)
 
     padded_data = b''.join(struct.pack("<I", w) for w in words)
-    print(words)
     hasher.update(padded_data)
-    return hasher.digest()
+    output = hasher.digest()
+
+    # Convert output to big-endian u32s for Cairo compatibility from blake2s little-endian
+    bytes_u32 = bytes_to_u32s_little(output)
+    bytes_u32.reverse()
+
+    # Convert back to bytes in big-endian order
+    result = 0
+    for i, byte in enumerate(bytes_u32):
+        result |= (byte << (i * 32))
+
+    return result.to_bytes(32, 'big')
 
 
 class Address:
@@ -205,8 +216,6 @@ def thash(pk_seed: bytes, address: Address, input_data: bytes) -> bytes:
 
     padded_seed = pk_seed + b'\x00' * (64 - SPX_N)
     data = padded_seed + address.to_bytes() + input_data
-    # Print input data as hex
-    print("thash input data:", data.hex())
     h = blake2s_raw(data)
     return h[:SPX_N]
 
@@ -486,7 +495,7 @@ def hash_message(randomizer: bytes, pk_seed: bytes, pk_root: bytes,
     """
     # First hash: H(R || pk_seed || pk_root || message)
     data = randomizer + pk_seed + pk_root + message
-    seed = blake2s_raw(data)
+    seed = blake2s_raw(data, print_debug=True)
 
     # MGF1 expansion: H(R || pk_seed || seed || counter=0)
     xof_data = randomizer + pk_seed + seed + struct.pack('>I', 0)
@@ -509,14 +518,27 @@ def split_digest(digest: bytes) -> tuple:
     return mhash, tree_addr, leaf_idx
 
 
-def bytes_to_u32s(data: bytes) -> list:
-    """Convert bytes to list of u32 values (little-endian to match Cairo)."""
+# Convert bytes to list of u32 values (little-endian)
+# This is used for interfacing with blake2s hashlib
+def bytes_to_u32s_little(data: bytes) -> list:
+    """Convert bytes to list of u32 values"""
     result = []
     for i in range(0, len(data), 4):
         chunk = data[i:i+4]
         if len(chunk) < 4:
             chunk = chunk + b'\x00' * (4 - len(chunk))
-        result.append(struct.unpack("<I", chunk)[0])  # Little-endian to match Cairo
+        result.append(struct.unpack("<I", chunk)[0])
+    return result
+
+# --- Helper to convert bytes to big-endian u32s for Cairo output ---
+def bytes_to_u32s(data: bytes) -> list:
+    """Convert bytes to list of u32 values"""
+    result = []
+    for i in range(0, len(data), 4):
+        chunk = data[i:i+4]
+        if len(chunk) < 4:
+            chunk = b'\x00' * (4 - len(chunk)) + chunk
+        result.append(struct.unpack(">I", chunk)[0])
     return result
 
 
@@ -723,7 +745,6 @@ def serialize_multi_sig_vector(sigs: list, pk_seed: bytes, pk_root: bytes, messa
     
     return result
 
-
 def main():
     import argparse
     parser = argparse.ArgumentParser(
@@ -745,6 +766,11 @@ def main():
         '--message-prefix',
         default='test',
         help='Prefix for generated messages (default: "test")'
+    )
+    parser.add_argument(
+        '--output', '-o',
+        default=None,
+        help='Output file (default: stdout)'
     )
     args = parser.parse_args()
     
@@ -788,7 +814,13 @@ def main():
 
     # Output as JSON
     hex_values = [hex(v) for v in result]
-    print(json.dumps(hex_values))
+    output_data = json.dumps(hex_values)
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write(output_data)
+    else:
+        print(output_data)
 
 
 if __name__ == "__main__":

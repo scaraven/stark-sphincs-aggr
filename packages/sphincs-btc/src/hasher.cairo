@@ -68,7 +68,7 @@ pub fn hash_message_btc(
 
     let (msg_words, msg_last_word, msg_last_word_len) = message.into_components();
     data.append_span(msg_words);
-
+    
     let mut state: HashState = Default::default();
     hash_init(ref state);
 
@@ -81,8 +81,11 @@ pub fn hash_message_btc(
     xof_data.append_span(seed.span());
     xof_data.append(0); // MGF1 counter = 0
 
+    let mut state: HashState = Default::default();
+    hash_init(ref state);
+
     // Apply MGF1 to the seed.
-    let hash_output = hash_finalize(state, xof_data.into(), 0, 0);
+    let hash_output = hash_finalize(state, xof_data, 0, 0);
 
     // For output_len = 22 bytes (SPX_DGST_BYTES for btc params):
     // We need 5 full words (20 bytes) + 2 bytes from the 6th word
@@ -165,7 +168,14 @@ mod tests {
 
     use crate::address::AddressType;
 
-#[test]
+    #[test]
+    fn test_to_hex() {
+        let data: Array<u32> = array![0x12345678, 0x9abcdef0, 0x0fedcba9];
+        let hex_str = to_hex(data.span());
+        assert_eq!(hex_str, "123456789abcdef00fedcba9");
+    }
+
+    #[test]
     fn test_thash_btc() {
         // Use deterministic seeds: 0x00, 0x01, ..., 0x0f (in big-endian)
         let pk_seed: HashOutput = [0x00010203, 0x04050607, 0x08090a0b, 0x0c0d0e0f];
@@ -177,7 +187,6 @@ mod tests {
         let mut addr: Address = Default::default();
 
         let result = thash_btc(ctx, @addr, test_data.span());
-        println!("thash_btc output: {}", to_hex(result.span()));
         assert_eq!(result, [3244308000, 1439338620, 170711974, 1165227932]);
 
         let ctx = initialize_hash_function(pk_seed);

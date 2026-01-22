@@ -118,6 +118,7 @@ class MultiSigBenchmarkRunner:
             "scarb", "--profile", "release", "execute",
             "--no-build",
             "--package", "sphincs_btc",
+            "--executable-name", "main_multi",
             "--print-resource-usage",
             "--arguments-file", args_file
         ]
@@ -211,6 +212,8 @@ class MultiSigBenchmarkRunner:
             "--proof-format", "cairo-serde",
             "--verify",
         ]
+
+        print(cmd)
         
         if prover_params_path.exists():
             cmd.extend(["--prover_params_json", str(prover_params_path.resolve())])
@@ -391,8 +394,8 @@ def main():
     parser.add_argument(
         '--num-signatures', '-n',
         type=int,
-        default=1,
-        help='Number of signatures to benchmark'
+        default=2,
+        help='Number of signatures to benchmark > 1'
     )
     parser.add_argument(
         '--seed',
@@ -416,6 +419,10 @@ def main():
     )
     
     args = parser.parse_args()
+
+    if args.num_signatures <= 1:
+        print("Error: --num-signatures must be at least 2")
+        sys.exit(1)
     
     # Find workspace root
     workspace_root = Path(__file__).parent.parent

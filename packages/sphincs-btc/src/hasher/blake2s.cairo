@@ -18,7 +18,7 @@ pub struct HashState {
 
 impl HashStateDefault of Default<HashState> {
     fn default() -> HashState {
-        HashState { h: BoxImpl::new(BLAKE2S_256_IV), byte_len: 0 }
+        HashState { h: BoxImpl::new([0; 8]), byte_len: 0 }
     }
 }
 
@@ -52,11 +52,9 @@ pub fn hash_finalize(
 ) -> [u32; 8] {
     let mut data = input.span();
 
-    let mut h = state.h;
-
     while let Some(chunk) = data.multi_pop_front::<16>() {
         state.byte_len += 64;
-        h = blake2s_compress(h, state.byte_len, *chunk);
+        state.h = blake2s_compress(state.h, state.byte_len, *chunk);
     }
 
     let mut buffer: Array<u32> = array![];
@@ -77,7 +75,7 @@ pub fn hash_finalize(
     }
 
     let msg = buffer.span().try_into().expect('Cast to @Blake2sInput failed');
-    let res = blake2s_finalize(h, state.byte_len, *msg);
+    let res = blake2s_finalize(state.h, state.byte_len, *msg);
     res.unbox()
 }
 

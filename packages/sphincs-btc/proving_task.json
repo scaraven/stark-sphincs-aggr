@@ -2,8 +2,8 @@
     "single_page": true,
     "tasks": [{
         "type": "Cairo1Executable",
-        "path": "target/release/sphincs_btc.executable.json",
+        "path": "target/release/main.executable.json",
         "program_hash_function": "blake",
-        "user_args_file": "packages/sphincs-btc/tests/data/test_vector.json"
+        "user_args_file": "benchmarks/results/temp_args/single_sig.json"
     }]
 }

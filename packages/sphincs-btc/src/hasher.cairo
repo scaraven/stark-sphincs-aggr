@@ -81,9 +81,6 @@ pub fn hash_message_btc(
     xof_data.append_span(seed.span());
     xof_data.append(0); // MGF1 counter = 0
 
-    let mut state: HashState = Default::default();
-    hash_init(ref state);
-
     // Apply MGF1 to the seed.
     let hash_output = hash_finalize(state, xof_data, 0, 0);
 

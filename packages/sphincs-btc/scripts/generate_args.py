@@ -78,19 +78,15 @@ def blake2s_raw(data: bytes, print_debug=False) -> bytes:
 
     padded_data = b''.join(struct.pack("<I", w) for w in words)
     hasher.update(padded_data)
+
+    # Convert output from little-endian
     output = hasher.digest()
 
-    # Convert output to big-endian u32s for Cairo compatibility from blake2s little-endian
-    bytes_u32 = bytes_to_u32s_little(output)
-    bytes_u32.reverse()
+    # Reverse every 4 bytes to match Cairo's big-endian output
+    reversed = b''.join(output[i:i+4][::-1] for i in range(0, len(output), 4))
+    assert(len(reversed) == 32)
 
-    # Convert back to bytes in big-endian order
-    result = 0
-    for i, byte in enumerate(bytes_u32):
-        result |= (byte << (i * 32))
-
-    return result.to_bytes(32, 'big')
-
+    return reversed
 
 class Address:
     """

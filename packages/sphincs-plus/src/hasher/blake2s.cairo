@@ -54,7 +54,7 @@ pub fn hash_finalize(
 
     while let Some(chunk) = data.multi_pop_front::<16>() {
         state.byte_len += 64;
-        blake2s_compress(state.h, state.byte_len, *chunk);
+        state.h = blake2s_compress(state.h, state.byte_len, *chunk);
     }
 
     let mut buffer: Array<u32> = array![];

@@ -42,7 +42,9 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
 pub fn thash_btc(ctx: SpxCtx, address: @Address, input: Span<u32>) -> HashOutput {
     let mut buffer = address.to_word_array();
     buffer.append_u32_span(input);
+
     let (words, last_word, last_word_len) = buffer.into_components();
+    
     let [d0, d1, d2, d3, _, _, _, _] = hash_finalize(
         ctx.state_seeded, words, last_word, last_word_len,
     );
@@ -66,7 +68,7 @@ pub fn hash_message_btc(
 
     let (msg_words, msg_last_word, msg_last_word_len) = message.into_components();
     data.append_span(msg_words);
-
+    
     let mut state: HashState = Default::default();
     hash_init(ref state);
 
@@ -80,7 +82,7 @@ pub fn hash_message_btc(
     xof_data.append(0); // MGF1 counter = 0
 
     // Apply MGF1 to the seed.
-    let hash_output = hash_finalize(state, xof_data.into(), 0, 0);
+    let hash_output = hash_finalize(state, xof_data, 0, 0);
 
     // For output_len = 22 bytes (SPX_DGST_BYTES for btc params):
     // We need 5 full words (20 bytes) + 2 bytes from the 6th word
@@ -155,4 +157,56 @@ pub impl HashOutputSerde of Serde<HashOutput> {
 pub fn to_hex(data: Span<u32>) -> ByteArray {
     let word_span = WordSpanTrait::new(data, 0, 0);
     crate::word_array::hex::words_to_hex(word_span)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::address::AddressType;
+
+    #[test]
+    fn test_to_hex() {
+        let data: Array<u32> = array![0x12345678, 0x9abcdef0, 0x0fedcba9];
+        let hex_str = to_hex(data.span());
+        assert_eq!(hex_str, "123456789abcdef00fedcba9");
+    }
+
+    #[test]
+    fn test_thash_btc() {
+        // Use deterministic seeds: 0x00, 0x01, ..., 0x0f (in big-endian)
+        let pk_seed: HashOutput = [0x00010203, 0x04050607, 0x08090a0b, 0x0c0d0e0f];
+
+        let test_data = array![0x10111213, 0x14151617, 0x18191a1b, 0x1c1d1e1f];
+    
+        let ctx = initialize_hash_function(pk_seed);
+
+        let mut addr: Address = Default::default();
+
+        let result = thash_btc(ctx, @addr, test_data.span());
+        assert_eq!(result, [3244308000, 1439338620, 170711974, 1165227932]);
+
+        let ctx = initialize_hash_function(pk_seed);
+        addr.set_hypertree_layer(1);
+        let result = thash_btc(ctx, @addr, test_data.span());
+        assert_eq!(result, [2980436067, 1337876336, 607666656, 25797468]);
+
+        let ctx = initialize_hash_function(pk_seed);
+        addr = Default::default();
+        addr.set_hypertree_addr(0x123);
+
+        let result = thash_btc(ctx, @addr, test_data.span());
+        assert_eq!(result, [1723354829, 4060091269, 908552801, 4065590746]);
+
+        let ctx = initialize_hash_function(pk_seed);
+        addr = Default::default();
+        addr.set_hypertree_layer(2);
+        addr.set_hypertree_addr(0xABC);
+        addr.set_address_type(AddressType::HASHTREE);
+        addr.set_keypair(5);
+        let result = thash_btc(ctx, @addr, test_data.span());
+
+        assert_eq!(result, [273953575, 3137967400, 575964652, 3828154744]);
+
+    }
 }

@@ -5,3 +5,7 @@ Scarb.lock
 context/
 node_modules/
 misc/
+
+### Python code
+__pycache__/
+*.pyc

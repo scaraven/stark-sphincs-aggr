@@ -99,11 +99,12 @@ class BenchmarkRunner:
         
         print(f"✓ Execution completed in {execution_time:.2f}s")
         
-        # Parse resource usage from output
-        resource_usage = self._parse_resource_usage(result.stdout)
+        # Parse resource usage from stdout and stderr to catch all prints
+        combined_output = result.stdout + result.stderr
+        resource_usage = self._parse_resource_usage(combined_output)
         
-        # Extract the raw resource usage section from output
-        resource_usage_raw = self._extract_resource_usage_raw(result.stdout)
+        # Extract the raw resource usage section from combined output
+        resource_usage_raw = self._extract_resource_usage_raw(combined_output)
         
         metrics = {
             "success": True,

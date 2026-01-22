@@ -33,6 +33,14 @@ pub struct Args {
     pub message: WordArray,
 }
 
+#[derive(Drop, Serde)]
+pub struct MultiSigArgs {
+    /// SPHINCS+ BTC public key (shared across all signatures).
+    pub pk: SphincsPublicKey,
+    /// Array of signature-message pairs.
+    pub sig_msg_pairs: Array<(SphincsSignature, WordArray)>,
+}
+
 #[executable]
 fn main(args: Args) {
     let Args { pk, sig, message } = args;
@@ -40,12 +48,19 @@ fn main(args: Args) {
     check_result(res);
 }
 
-#[cfg(or(feature: "blake_hash", feature: "debug"))]
-fn check_result(_res: bool) {
-    // Skip signature verification in blake_hash or debug mode
+#[executable]
+fn main_multi(args: MultiSigArgs) {
+    let MultiSigArgs { pk, sig_msg_pairs } = args;
+    let res = sphincs::verify_btc_batch(sig_msg_pairs.span(), pk);
+    check_result(res);
 }
 
-#[cfg(not(or(feature: "blake_hash", feature: "debug")))]
+#[cfg(feature:  "debug")]
+fn check_result(_res: bool) {
+    println!("Verification result: {}", _res);
+}
+
+#[cfg(not(feature: "debug"))]
 fn check_result(res: bool) {
     assert(res, 'invalid signature');
 }

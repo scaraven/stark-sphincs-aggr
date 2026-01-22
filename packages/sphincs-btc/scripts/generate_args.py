@@ -17,6 +17,7 @@ Parameters:
 """
 
 import hashlib
+import os
 import struct
 import json
 import sys
@@ -37,10 +38,55 @@ SPX_WOTS_TARGET_SUM = 2040
 SPX_DGST_BYTES = 22  # mhash(18) + tree_addr(3) + leaf_idx(1)
 
 
-def blake2s_raw(data: bytes) -> bytes:
-    """Standard Blake2s-256."""
-    return hashlib.blake2s(data, digest_size=32).digest()
+def blake2s_raw(data: bytes, print_debug=False) -> bytes:
+    """
+    Blake2s-256 matching Cairo's implementation.
+    
+    Formats input data to match Cairo's padding and chunking behavior,
+    then uses standard blake2s as a black box.
+    """
+    # Convert bytes to u32 words
+    full_words = len(data) // 4
+    remaining_bytes = len(data) % 4
 
+    hasher = hashlib.blake2s(digest_size=32)
+
+    words = []
+    
+    # Add all full words
+    for i in range(full_words):
+        word = struct.unpack(">I", data[i*4:(i+1)*4])[0]
+        words.append(word)
+    
+    # Handle partial last word (Cairo's padding logic)
+    if remaining_bytes > 0:
+        last_bytes = data[full_words*4:]
+        # Pack bytes and shift to high-order position
+        last_word = 0
+        for b in last_bytes:
+            last_word = (last_word << 8) | b
+        
+        # Cairo shifts based on remaining bytes
+        if remaining_bytes == 1:
+            last_word = last_word * 0x1000000  # Shift to highest byte
+        elif remaining_bytes == 2:
+            last_word = last_word * 0x10000    # Shift to high 2 bytes
+        elif remaining_bytes == 3:
+            last_word = last_word * 0x100      # Shift to high 3 bytes
+        
+        words.append(last_word)
+
+    padded_data = b''.join(struct.pack("<I", w) for w in words)
+    hasher.update(padded_data)
+
+    # Convert output from little-endian
+    output = hasher.digest()
+
+    # Reverse every 4 bytes to match Cairo's big-endian output
+    reversed = b''.join(output[i:i+4][::-1] for i in range(0, len(output), 4))
+    assert(len(reversed) == 32)
+
+    return reversed
 
 class Address:
     """
@@ -163,6 +209,7 @@ def thash(pk_seed: bytes, address: Address, input_data: bytes) -> bytes:
     Equivalent to: Blake2s(pk_seed || zeros_48 || address || input)[0:16]
     """
     # Build the full input: pk_seed padded to 64 bytes + address + input
+
     padded_seed = pk_seed + b'\x00' * (64 - SPX_N)
     data = padded_seed + address.to_bytes() + input_data
     h = blake2s_raw(data)
@@ -444,7 +491,7 @@ def hash_message(randomizer: bytes, pk_seed: bytes, pk_root: bytes,
     """
     # First hash: H(R || pk_seed || pk_root || message)
     data = randomizer + pk_seed + pk_root + message
-    seed = blake2s_raw(data)
+    seed = blake2s_raw(data, print_debug=True)
 
     # MGF1 expansion: H(R || pk_seed || seed || counter=0)
     xof_data = randomizer + pk_seed + seed + struct.pack('>I', 0)
@@ -467,13 +514,26 @@ def split_digest(digest: bytes) -> tuple:
     return mhash, tree_addr, leaf_idx
 
 
-def bytes_to_u32s(data: bytes) -> list:
-    """Convert bytes to list of u32 values (big-endian)."""
+# Convert bytes to list of u32 values (little-endian)
+# This is used for interfacing with blake2s hashlib
+def bytes_to_u32s_little(data: bytes) -> list:
+    """Convert bytes to list of u32 values"""
     result = []
     for i in range(0, len(data), 4):
         chunk = data[i:i+4]
         if len(chunk) < 4:
             chunk = chunk + b'\x00' * (4 - len(chunk))
+        result.append(struct.unpack("<I", chunk)[0])
+    return result
+
+# --- Helper to convert bytes to big-endian u32s for Cairo output ---
+def bytes_to_u32s(data: bytes) -> list:
+    """Convert bytes to list of u32 values"""
+    result = []
+    for i in range(0, len(data), 4):
+        chunk = data[i:i+4]
+        if len(chunk) < 4:
+            chunk = b'\x00' * (4 - len(chunk)) + chunk
         result.append(struct.unpack(">I", chunk)[0])
     return result
 
@@ -626,13 +686,100 @@ def serialize_test_vector(sig: dict, pk_seed: bytes, pk_root: bytes, message: by
     return result
 
 
+def serialize_multi_sig_vector(sigs: list, pk_seed: bytes, pk_root: bytes, messages: list) -> list:
+    """Serialize multiple signatures to Cairo-compatible format."""
+    result = []
+    
+    # === Public key (shared for all signatures) ===
+    result.extend(bytes_to_u32s(pk_seed))
+    result.extend(bytes_to_u32s(pk_root))
+    
+    # === Number of signatures ===
+    result.append(len(sigs))
+    
+    # === Each signature ===
+    for sig, message in zip(sigs, messages):
+        # Randomizer (16 bytes = 4 u32)
+        result.extend(bytes_to_u32s(sig['randomizer']))
+        
+        # FORS signature: 10 trees * (sk_seed + 14 auth_path entries)
+        for tree_sig in sig['fors_sig']:
+            sk, auth = tree_sig
+            result.extend(bytes_to_u32s(sk))  # 4 u32
+            for a in auth:
+                result.extend(bytes_to_u32s(a))  # 14 * 4 u32
+        
+        # WOTS+C Merkle signatures: 4 layers
+        for wots_sig in sig['wots_sigs']:
+            # 14 chains (each 16 bytes = 4 u32)
+            for chain_val in wots_sig['chains']:
+                result.extend(bytes_to_u32s(chain_val))
+            # Counter (1 u32)
+            result.append(wots_sig['counter'])
+            # 8 auth path entries (each 16 bytes = 4 u32)
+            for auth in wots_sig['auth_path']:
+                result.extend(bytes_to_u32s(auth))
+        
+        # === Message as WordArray ===
+        msg_len = len(message)
+        full_words = msg_len // 4
+        remaining = msg_len % 4
+        
+        words = []
+        for i in range(full_words):
+            words.append(struct.unpack(">I", message[i*4:(i+1)*4])[0])
+        
+        last_word = 0
+        if remaining > 0:
+            for b in message[full_words*4:]:
+                last_word = (last_word << 8) | b
+        
+        result.append(len(words))  # Array length
+        result.extend(words)
+        result.append(last_word)
+        result.append(remaining)
+    
+    return result
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Generate SPHINCS+ BTC test vectors with multi-signature support"
+    )
+    parser.add_argument(
+        '--num-signatures', '-n',
+        type=int,
+        default=1,
+        help='Number of signatures to generate (default: 1)'
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=0,
+        help='RNG seed for deterministic generation (default: 0)'
+    )
+    parser.add_argument(
+        '--message-prefix',
+        default='test',
+        help='Prefix for generated messages (default: "test")'
+    )
+    parser.add_argument(
+        '--output', '-o',
+        default=None,
+        help='Output file (default: stdout)'
+    )
+    args = parser.parse_args()
+    
     print("=== SPHINCS+ BTC Test Vector Generator ===", file=sys.stderr)
     print(f"Parameters: n={SPX_N}, h={SPX_FULL_HEIGHT}, d={SPX_D}, k={SPX_FORS_TREES}, a={SPX_FORS_HEIGHT}", file=sys.stderr)
+    print(f"Number of signatures: {args.num_signatures}", file=sys.stderr)
+    print(f"RNG seed: {args.seed}", file=sys.stderr)
 
     # Deterministic seeds for reproducibility
-    sk_seed = bytes(SPX_N)  # All zeros
-    pk_seed = bytes(SPX_N)  # All zeros
+    import hashlib
+    seed_hash = hashlib.sha256(str(args.seed).encode()).digest()
+    sk_seed = seed_hash[:SPX_N]
+    pk_seed = seed_hash[SPX_N:SPX_N*2] if len(seed_hash) >= SPX_N*2 else bytes(SPX_N)
 
     print(f"\nSecret seed: {sk_seed.hex()}", file=sys.stderr)
     print(f"Public seed: {pk_seed.hex()}", file=sys.stderr)
@@ -640,20 +787,36 @@ def main():
     # Create signer
     signer = SphinxBtcSigner(sk_seed, pk_seed)
 
-    # Sign message
-    message = b"test"
-    print(f"\nSigning message: {message}", file=sys.stderr)
-    sig = signer.sign(message)
+    # Generate multiple signatures
+    sigs = []
+    messages = []
+    for i in range(args.num_signatures):
+        message = f"{args.message_prefix}{i}".encode()
+        messages.append(message)
+        print(f"\nSigning message {i+1}/{args.num_signatures}: {message}", file=sys.stderr)
+        sig = signer.sign(message)
+        sigs.append(sig)
 
     # Serialize
-    result = serialize_test_vector(sig, pk_seed, signer.pk_root, message)
+    if args.num_signatures == 1:
+        # Single signature: use original format for backward compatibility
+        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root, messages[0])
+    else:
+        # Multiple signatures: use new format
+        result = serialize_multi_sig_vector(sigs, pk_seed, signer.pk_root, messages)
 
     print(f"\nTotal elements: {len(result)}", file=sys.stderr)
-    print(f"Signature generated successfully!", file=sys.stderr)
+    print(f"Signature(s) generated successfully!", file=sys.stderr)
 
     # Output as JSON
     hex_values = [hex(v) for v in result]
-    print(json.dumps(hex_values))
+    output_data = json.dumps(hex_values)
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write(output_data)
+    else:
+        print(output_data)
 
 
 if __name__ == "__main__":

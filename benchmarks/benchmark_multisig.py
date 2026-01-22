@@ -191,6 +191,7 @@ class MultiSigBenchmarkRunner:
 
         try:
             proving_task["tasks"][0]["user_args_file"] = str(Path(args_file).resolve())
+            proving_task["tasks"][0]["path"] = str((self.target_dir / "release" / "main_multi.executable.json").resolve())
         except Exception as exc:
             return {"success": False, "error": f"Failed to patch proving task: {exc}"}
 
@@ -212,8 +213,6 @@ class MultiSigBenchmarkRunner:
             "--proof-format", "cairo-serde",
             "--verify",
         ]
-
-        print(cmd)
         
         if prover_params_path.exists():
             cmd.extend(["--prover_params_json", str(prover_params_path.resolve())])

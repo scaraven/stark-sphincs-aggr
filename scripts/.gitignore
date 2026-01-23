@@ -1,0 +1,5 @@
+# Python environment
+.venv/
+
+# Pytest
+.pytest_cache/

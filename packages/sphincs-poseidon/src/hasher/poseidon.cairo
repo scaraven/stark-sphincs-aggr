@@ -20,7 +20,7 @@ impl HashStateDefault of Default<HashState> {
 
 /// Initializes the Poseidon hasher state.
 pub fn hash_init(ref state: HashState) {
-    state.state = PoseidonTrait::new();
+    // no-op
 }
 
 /// Updates the Poseidon hasher state with a single block of felt252 values.
@@ -76,4 +76,28 @@ pub fn hash_update_block(ref state: HashState, mut data: Span<felt252>) {
 pub fn hash_finalize(ref state: HashState, input: Span<felt252>) -> felt252 {
     hash_update_block(ref state, input);
     state.state.finalize()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test] 
+    fn test_hash_length_consitent() {
+        // This tests ensures that if we hash 4 felt252 values and then update with 1 more, we 
+        // get the same result as hashing all 5 at once.
+        let mut state: HashState = Default::default();
+
+        let data: [felt252; 4] = [1, 2, 3, 4];
+        hash_update_4(ref state, data);
+        state.state = state.state.update(5);
+
+        let output1 = state.state.finalize();
+
+        let mut state = Default::default();
+        let data: [felt252; 5] = [1, 2, 3, 4, 5];
+        let output2 = hash_update_5_finalize(ref state, data);
+
+        assert_eq!(output1, output2, "Poseidon hash outputs do not match");
+    }
 }

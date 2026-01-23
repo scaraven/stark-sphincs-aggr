@@ -288,7 +288,10 @@ pub impl ForsCSignatureSerde of Serde<ForsCSignature> {
             let sig = ForsFullTreeSigSerde::deserialize(ref serialized)?;
             full_sigs_arr.append(sig);
         }
-        let full_sigs: @Box<[ForsFullTreeSig; SPX_FORS_FULL_TREES]> = full_sigs_arr.span().try_into().unwrap();
+        let full_sigs: @Box<[ForsFullTreeSig; SPX_FORS_FULL_TREES]> = full_sigs_arr
+            .span()
+            .try_into()
+            .unwrap();
         let compressed_sig = ForsCompressedTreeSigSerde::deserialize(ref serialized)?;
         Some(ForsCSignature { full_sigs: full_sigs.unbox(), compressed_sig })
     }

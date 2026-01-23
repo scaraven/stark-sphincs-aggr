@@ -44,7 +44,7 @@ pub fn thash_btc(ctx: SpxCtx, address: @Address, input: Span<u32>) -> HashOutput
     buffer.append_u32_span(input);
 
     let (words, last_word, last_word_len) = buffer.into_components();
-    
+
     let [d0, d1, d2, d3, _, _, _, _] = hash_finalize(
         ctx.state_seeded, words, last_word, last_word_len,
     );
@@ -68,7 +68,7 @@ pub fn hash_message_btc(
 
     let (msg_words, msg_last_word, msg_last_word_len) = message.into_components();
     data.append_span(msg_words);
-    
+
     let mut state: HashState = Default::default();
     hash_init(ref state);
 
@@ -161,9 +161,8 @@ pub fn to_hex(data: Span<u32>) -> ByteArray {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use crate::address::AddressType;
+    use super::*;
 
     #[test]
     fn test_to_hex() {
@@ -178,7 +177,7 @@ mod tests {
         let pk_seed: HashOutput = [0x00010203, 0x04050607, 0x08090a0b, 0x0c0d0e0f];
 
         let test_data = array![0x10111213, 0x14151617, 0x18191a1b, 0x1c1d1e1f];
-    
+
         let ctx = initialize_hash_function(pk_seed);
 
         let mut addr: Address = Default::default();
@@ -207,6 +206,5 @@ mod tests {
         let result = thash_btc(ctx, @addr, test_data.span());
 
         assert_eq!(result, [273953575, 3137967400, 575964652, 3828154744]);
-
     }
 }

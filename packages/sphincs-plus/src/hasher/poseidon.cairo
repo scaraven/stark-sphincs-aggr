@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: MIT
 
 use core::hash::{HashStateExTrait, HashStateTrait};
+use core::poseidon::{HashState as PoseidonHashState, PoseidonTrait};
 use core::traits::DivRem;
-use core::poseidon::PoseidonTrait;
-use core::poseidon::{HashState as PoseidonHashState};
 
 /// Poseidon incremental state.
 /// The Poseidon hash state maintains 3 field elements (s0, s1, s2).
@@ -30,7 +29,7 @@ pub fn hash_init(ref state: HashState) {
 /// Updates the Poseidon hasher state with a single block of 16 u32 values.
 pub fn hash_update_block(ref state: HashState, data: [u32; 16]) {
     state.byte_len += 64;
-    
+
     // Update with array of u32
     state.state = state.state.update_with(data);
 }
@@ -101,7 +100,7 @@ fn felt252_to_u32_array(x: felt252) -> [u32; 8] {
         let r_elem: u32 = remainder.try_into().unwrap();
         r.append(r_elem)
     }
-    
+
     let mut r_span = r.span();
 
     let chunk = r_span.multi_pop_front::<8>().unwrap();

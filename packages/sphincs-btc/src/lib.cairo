@@ -19,7 +19,6 @@ pub mod params_btc;
 pub mod sphincs;
 pub mod word_array;
 pub mod wots_c;
-
 use crate::sphincs::{SphincsPublicKey, SphincsSignature};
 use crate::word_array::{WordArray, WordArrayTrait};
 
@@ -55,7 +54,7 @@ fn main_multi(args: MultiSigArgs) {
     check_result(res);
 }
 
-#[cfg(feature:  "debug")]
+#[cfg(feature: "debug")]
 fn check_result(_res: bool) {
     println!("Verification result: {}", _res);
 }

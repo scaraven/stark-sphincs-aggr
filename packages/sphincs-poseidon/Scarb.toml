@@ -3,6 +3,8 @@ name = "sphincs_poseidon"
 version = "0.1.0"
 edition = "2024_07"
 
+experimental-features = ["user_defined_inline_macros"]
+
 [lib]
 
 [executable]

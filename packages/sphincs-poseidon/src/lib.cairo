@@ -24,10 +24,7 @@ pub struct Args {
 
 #[executable]
 fn main() {
-    let pk = SphincsPublicKey {
-        pk_root: 2101057191,
-        pk_seed: 502713403,
-    };
+    let pk = SphincsPublicKey { pk_root: 2101057191, pk_seed: 502713403 };
 
     let sig = SphincsSignature {
         randomizer: 123456789,

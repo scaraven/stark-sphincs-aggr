@@ -55,7 +55,8 @@ pub const SPX_LEAF_BITS: usize = 8;
 /// Bottom leaf index byte length: ceil(8 / 8) = 1.
 pub const SPX_LEAF_BYTES: usize = 1;
 
-/// Extended message digest length: SPX_FORS_MSG_BYTES + SPX_TREE_BYTES + SPX_LEAF_BYTES = 18 + 3 + 1 = 22.
+/// Extended message digest length: SPX_FORS_MSG_BYTES + SPX_TREE_BYTES + SPX_LEAF_BYTES = 18 + 3 +
+/// 1 = 22.
 pub const SPX_DGST_BYTES: usize = 22;
 
 // === WOTS+C Parameters (w=256) ===

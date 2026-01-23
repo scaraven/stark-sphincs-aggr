@@ -5,14 +5,14 @@
 // Available hash functions.
 mod blake;
 mod poseidon;
+use core::hash::HashStateTrait;
 
 // Poseidon backend (arithmetic-friendly).
-pub use poseidon::hash_update_block;
+pub use poseidon::hash_update_16_finalize;
 use poseidon::{
-    HashState, hash_finalize_block, hash_init, hash_update,
+    HashState, hash_init, hash_update_16, hash_update_3_finalize, hash_update_4_finalize,
+    hash_update_5_finalize,
 };
-
-use core::hash::HashStateTrait;
 
 // Imports.
 use crate::address::{Address, AddressTrait};
@@ -38,21 +38,17 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
 }
 
 /// Poseidon-backed thash for 1 input field element.
-pub fn thash_4(ctx: SpxCtx, address: @Address, data: felt252) -> HashOutput {
+pub fn thash_single(ctx: SpxCtx, address: @Address, data: felt252) -> HashOutput {
     let (a0, a1) = address.into_fields();
     let mut state = ctx.state_seeded;
-    hash_finalize_block(
-        ref state, [a0, a1, data, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    )
+    hash_update_3_finalize(ref state, [a0, a1, data])
 }
 
 /// Poseidon-backed thash for 2 input words
 pub fn thash_8(ctx: SpxCtx, address: @Address, word0: felt252, word1: felt252) -> HashOutput {
     let (a0, a1) = address.into_fields();
     let mut state = ctx.state_seeded;
-    hash_finalize_block(
-        ref state, [a0, a1, word0, word1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    )
+    hash_update_4_finalize(ref state, [a0, a1, word0, word1])
 }
 
 /// Poseidon-backed thash for FORS public key hashing.
@@ -65,21 +61,25 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Has
     // Do initial update with address fields
     if let Some(chunk) = data.multi_pop_front::<14>() {
         let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] = (*chunk).unbox();
-        hash_update(ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13]);
+        hash_update_16(
+            ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13],
+        );
     }
 
     while let Some(chunk) = data.multi_pop_front::<16>() {
-        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15] =
-            (*chunk).unbox();
-        hash_update(ref state, [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15]);
+        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15] = (*chunk)
+            .unbox();
+        hash_update_16(
+            ref state, [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15],
+        );
     }
 
     match data.multi_pop_front::<5>() {
         Some(chunk) => {
             let [d0, d1, d2, d3, d4] = (*chunk).unbox();
-            hash_finalize_block(ref state, [d0, d1, d2, d3, d4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            hash_update_5_finalize(ref state, [d0, d1, d2, d3, d4])
         },
-        None => panic!("thash_140: unexpected data length")
+        None => panic!("thash_140: unexpected data length"),
     }
 }
 
@@ -92,9 +92,10 @@ pub fn thash_56(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Hash
     assert(data_len == 14, 'thash_56: expected len = 14');
 
     while let Some(chunk) = data.multi_pop_front::<14>() {
-        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] =
-            (*chunk).unbox();
-        return hash_finalize_block(ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13]);
+        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] = (*chunk).unbox();
+        return hash_update_16_finalize(
+            ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13],
+        );
     }
 
     panic!("thash_56: unexpected data length");
@@ -104,12 +105,12 @@ pub fn thash_56(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Hash
 fn felt252_to_u32_array(value: felt252) -> Array<u32> {
     let value_u256: u256 = value.into();
     let mut result: Array<u32> = array![];
-    
+
     result.append((value_u256 & 0xFFFFFFFF).try_into().unwrap());
     result.append(((value_u256 / 0x100000000) & 0xFFFFFFFF).try_into().unwrap());
     result.append(((value_u256 / 0x10000000000000000) & 0xFFFFFFFF).try_into().unwrap());
     result.append(((value_u256 / 0x1000000000000000000000000) & 0xFFFFFFFF).try_into().unwrap());
-    
+
     result
 }
 

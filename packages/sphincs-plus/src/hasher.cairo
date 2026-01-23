@@ -154,9 +154,7 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<[u32; 4]>) -> Ha
     let [w0, w1] = (*block).unbox();
     let [d0, d1, d2, d3] = w0;
     let [d4, d5, d6, d7] = w1;
-    hash_update_block(
-        ref state, [a0, a1, a2, a3, a4, a5, a6, a7, d0, d1, d2, d3, d4, d5, d6, d7],
-    );
+    hash_update_block(ref state, [a0, a1, a2, a3, a4, a5, a6, a7, d0, d1, d2, d3, d4, d5, d6, d7]);
 
     while let Some(block) = data.multi_pop_front::<4>() {
         let [w0, w1, w2, w3] = (*block).unbox();
@@ -165,8 +163,7 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<[u32; 4]>) -> Ha
         let [d8, d9, d10, d11] = w2;
         let [d12, d13, d14, d15] = w3;
         hash_update_block(
-            ref state,
-            [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15],
+            ref state, [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15],
         );
     }
 
@@ -191,9 +188,7 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<[u32; 4]>) -> Ha
     let [w0, w1] = (*block).unbox();
     let [d0, d1, d2, d3] = w0;
     let [d4, d5, d6, d7] = w1;
-    hash_update_block(
-        ref state, [a0, a1, a2, a3, a4, a5, a6, a7, d0, d1, d2, d3, d4, d5, d6, d7],
-    );
+    hash_update_block(ref state, [a0, a1, a2, a3, a4, a5, a6, a7, d0, d1, d2, d3, d4, d5, d6, d7]);
 
     while let Some(block) = data.multi_pop_front::<4>() {
         let [w0, w1, w2, w3] = (*block).unbox();
@@ -202,8 +197,7 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<[u32; 4]>) -> Ha
         let [d8, d9, d10, d11] = w2;
         let [d12, d13, d14, d15] = w3;
         hash_update_block(
-            ref state,
-            [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15],
+            ref state, [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15],
         );
     }
 
@@ -282,9 +276,7 @@ pub fn thash_56(ctx: SpxCtx, address: @Address, data: Span<[u32; 4]>) -> HashOut
     let [d48, d49, d50, d51] = w12;
     let [d52, d53, d54, d55] = w13;
 
-    hash_update_block(
-        ref state, [a0, a1, a2, a3, a4, a5, a6, a7, d0, d1, d2, d3, d4, d5, d6, d7],
-    );
+    hash_update_block(ref state, [a0, a1, a2, a3, a4, a5, a6, a7, d0, d1, d2, d3, d4, d5, d6, d7]);
     hash_update_block(
         ref state, [d8, d9, d10, d11, d12, d13, d14, d15, d16, d17, d18, d19, d20, d21, d22, d23],
     );

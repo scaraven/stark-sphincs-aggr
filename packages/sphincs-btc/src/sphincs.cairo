@@ -89,7 +89,9 @@ pub fn verify_btc(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKey
     let mut layer: u8 = 0;
     let mut wots_merkle_sig_iter = wots_merkle_sig_list.span();
 
-    while let Some(WotsCMerkleSignature { wots_sig, auth_path }) = wots_merkle_sig_iter.pop_front() {
+    while let Some(WotsCMerkleSignature {
+        wots_sig, auth_path,
+    }) = wots_merkle_sig_iter.pop_front() {
         tree_addr.set_hypertree_layer(layer);
         tree_addr.set_hypertree_addr(tree_address.into());
 
@@ -134,13 +136,12 @@ pub fn verify_btc(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKey
 /// Verify multiple SPHINCS+ signatures in batch.
 /// Returns true if ALL signatures are valid, false if ANY signature is invalid.
 pub fn verify_btc_batch(
-    sig_msg_pairs: Span<(SphincsSignature, WordArray)>,
-    pk: SphincsPublicKey
+    sig_msg_pairs: Span<(SphincsSignature, WordArray)>, pk: SphincsPublicKey,
 ) -> bool {
     let mut iter = sig_msg_pairs;
     let mut all_valid = true;
     let mut idx = 0;
-    
+
     for (sig, message) in iter {
         debug_print_batch_start(idx);
         let valid = verify_btc(message.span(), *sig, pk);
@@ -151,8 +152,8 @@ pub fn verify_btc_batch(
             debug_print_batch_success(idx);
         }
         idx += 1;
-    };
-    
+    }
+
     all_valid
 }
 
@@ -185,7 +186,9 @@ fn debug_print_layer(layer: u8, tree_address: u32, leaf_idx: u8, root: HashOutpu
 }
 
 #[cfg(not(feature: "debug"))]
-fn debug_print_layer(_layer: u8, _tree_address: u32, _leaf_idx: u8, _root: HashOutput, _counter: u32) {}
+fn debug_print_layer(
+    _layer: u8, _tree_address: u32, _leaf_idx: u8, _root: HashOutput, _counter: u32,
+) {}
 
 #[cfg(feature: "debug")]
 fn debug_print_wots_pk_len(len: usize) {
@@ -328,7 +331,14 @@ impl SphincsSignatureSerde of Serde<SphincsSignature> {
             let wms = WotsCMerkleSignatureSerde::deserialize(ref serialized)?;
             wots_list.append(wms);
         }
-        let wots_merkle_sig_list: @Box<[WotsCMerkleSignature; SPX_D]> = wots_list.span().try_into().unwrap();
-        Some(SphincsSignature { randomizer, fors_sig, wots_merkle_sig_list: wots_merkle_sig_list.unbox() })
+        let wots_merkle_sig_list: @Box<[WotsCMerkleSignature; SPX_D]> = wots_list
+            .span()
+            .try_into()
+            .unwrap();
+        Some(
+            SphincsSignature {
+                randomizer, fors_sig, wots_merkle_sig_list: wots_merkle_sig_list.unbox(),
+            },
+        )
     }
 }

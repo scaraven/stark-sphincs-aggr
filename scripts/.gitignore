@@ -3,3 +3,6 @@
 
 # Pytest
 .pytest_cache/
+
+# Pyproject
+*.egg-info/

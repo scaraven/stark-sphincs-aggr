@@ -83,7 +83,7 @@ mod tests {
     use super::*;
 
     #[test] 
-    fn test_hash_length_consitent() {
+    fn test_hash_length_consistent() {
         // This tests ensures that if we hash 4 felt252 values and then update with 1 more, we 
         // get the same result as hashing all 5 at once.
         let mut state: HashState = Default::default();
@@ -99,5 +99,6 @@ mod tests {
         let output2 = hash_update_5_finalize(ref state, data);
 
         assert_eq!(output1, output2, "Poseidon hash outputs do not match");
+        assert_eq!(output1, 611250879885582549814822745980582240134120981459161846704834910080944450980, "Poseidon hash output does not match expected value");
     }
 }

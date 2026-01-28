@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 // Available hash functions.
-mod blake;
 mod poseidon;
 use core::hash::HashStateTrait;
 
@@ -101,17 +100,25 @@ pub fn thash_56(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Hash
     panic!("thash_56: unexpected data length");
 }
 
-/// Convert a felt252 to an array of 4 u32s (little-endian).
-fn felt252_to_u32_array(value: felt252) -> Array<u32> {
-    let value_u256: u256 = value.into();
-    let mut result: Array<u32> = array![];
+/// Convert a felt252 to an array of 8 u32s (big-endian).
+/// Note the msb u32 will have some leading zeros as felt252 is only 252 bits.
+pub fn felt252_to_u32_array(value: felt252) -> [u32; 8] {
+    let mut value_u256: u256 = value.into();
 
-    result.append((value_u256 & 0xFFFFFFFF).try_into().unwrap());
-    result.append(((value_u256 / 0x100000000) & 0xFFFFFFFF).try_into().unwrap());
-    result.append(((value_u256 / 0x10000000000000000) & 0xFFFFFFFF).try_into().unwrap());
-    result.append(((value_u256 / 0x1000000000000000000000000) & 0xFFFFFFFF).try_into().unwrap());
+    // Take 32 bits at a time
+    let (rem, a) = DivRem::div_rem(value_u256, 0x100000000);
+    let (rem, b) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, c) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, d) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, e) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, f) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, g) = DivRem::div_rem(rem, 0x100000000);
+    let (o, h) = DivRem::div_rem(rem, 0x100000000);
 
-    result
+    assert(o == 0, 'felt252_to_u32_array: overflow');
+
+    [h.try_into().unwrap(), g.try_into().unwrap(), f.try_into().unwrap(), e.try_into().unwrap(), 
+    d.try_into().unwrap(), c.try_into().unwrap(), b.try_into().unwrap(), a.try_into().unwrap()]
 }
 
 /// Hash a message using selected hash function.
@@ -124,38 +131,31 @@ pub fn hash_message_128s(
     pk_root: HashOutput,
     message: WordSpan,
     output_len: u32,
-) -> WordArray {
-    let mut data: Array<u32> = array![];
-    data.append_span(felt252_to_u32_array(randomizer).span());
-    data.append_span(felt252_to_u32_array(pk_seed).span());
-    data.append_span(felt252_to_u32_array(pk_root).span());
+) -> felt252 {
+    let mut data: Array<felt252> = array![];
+    data.append(randomizer);
+    data.append(pk_seed);
+    data.append(pk_root);
 
-    let (msg_words, msg_last_word, msg_last_word_len) = message.into_components();
-    data.append_span(msg_words);
+    let msg_words = message.into_felt252();
+    data.append_span(msg_words.span());
 
-    let mut state: blake::HashState = Default::default();
-    blake::hash_init(ref state);
+    let mut state: HashState = Default::default();
+    poseidon::hash_init(ref state);
 
     // Compute the seed for XOF.
-    let seed = blake::hash_finalize(state, data, msg_last_word, msg_last_word_len);
+    let seed = poseidon::hash_finalize(ref state, data.span());
 
-    let mut xof_data: Array<u32> = array![];
-    xof_data.append_span(felt252_to_u32_array(randomizer).span());
-    xof_data.append_span(felt252_to_u32_array(pk_seed).span());
-    xof_data.append_span(seed.span());
+    let mut xof_data: Array<felt252> = array![];
+    xof_data.append(randomizer);
+    xof_data.append(pk_seed);
+    xof_data.append(seed);
     xof_data.append(0); // MGF1 counter = 0
 
     // Apply MGF1 to the seed.
-    let mut buffer = blake::hash_finalize(state, xof_data, 0, 0).span();
+    let buffer = poseidon::hash_finalize(ref state, xof_data.span());
 
-    // Construct the digest from the extended output.
-    // NOTE: we haven't cleared the LSB of the last word, has to be handled correctly.
-    let last_word = *buffer.pop_back().unwrap();
-
-    // Construct the digest from the first 7 words (28 bits) and add 2 bytes from the last word.
-    let res = WordArrayTrait::new(buffer.into(), last_word / 0x10000, 2);
-    assert(res.byte_len() == output_len, 'Invalid extended digest length');
-    res
+    buffer
 }
 
 /// Compute the root of a tree given the leaf and the authentication path.
@@ -209,4 +209,18 @@ pub impl HashOutputSerde of Serde<HashOutput> {
 pub fn to_hex(data: Span<u32>) -> ByteArray {
     let word_span = WordSpanTrait::new(data, 0, 0);
     crate::word_array::hex::words_to_hex(word_span)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_felt252_to_u32_array() {
+        let value: felt252 = 0x0123456890abcdef0123456890abcdef0123456890abcdef0123456890abcde;
+        let arr = felt252_to_u32_array(value);
+        assert_eq!(arr, 
+            [0x01234568, 0x90abcdef, 0x01234568, 0x90abcdef,
+             0x01234568, 0x90abcdef, 0x01234568, 0x90abcde]);
+    }
 }

@@ -36,57 +36,6 @@ SPX_WOTS_C_OMIT = 2
 SPX_WOTS_TARGET_SUM = 2040
 SPX_DGST_BYTES = 22  # mhash(18) + tree_addr(3) + leaf_idx(1)
 
-
-def blake2s_raw(data: bytes, print_debug=False) -> bytes:
-    """
-    Blake2s-256 matching Cairo's implementation.
-    
-    Formats input data to match Cairo's padding and chunking behavior,
-    then uses standard blake2s as a black box.
-    """
-    # Convert bytes to u32 words
-    full_words = len(data) // 4
-    remaining_bytes = len(data) % 4
-
-    hasher = hashlib.blake2s(digest_size=32)
-
-    words = []
-    
-    # Add all full words
-    for i in range(full_words):
-        word = struct.unpack(">I", data[i*4:(i+1)*4])[0]
-        words.append(word)
-    
-    # Handle partial last word (Cairo's padding logic)
-    if remaining_bytes > 0:
-        last_bytes = data[full_words*4:]
-        # Pack bytes and shift to high-order position
-        last_word = 0
-        for b in last_bytes:
-            last_word = (last_word << 8) | b
-        
-        # Cairo shifts based on remaining bytes
-        if remaining_bytes == 1:
-            last_word = last_word * 0x1000000  # Shift to highest byte
-        elif remaining_bytes == 2:
-            last_word = last_word * 0x10000    # Shift to high 2 bytes
-        elif remaining_bytes == 3:
-            last_word = last_word * 0x100      # Shift to high 3 bytes
-        
-        words.append(last_word)
-
-    padded_data = b''.join(struct.pack("<I", w) for w in words)
-    hasher.update(padded_data)
-
-    # Convert output from little-endian
-    output = hasher.digest()
-
-    # Reverse every 4 bytes to match Cairo's big-endian output
-    reversed = b''.join(output[i:i+4][::-1] for i in range(0, len(output), 4))
-    assert(len(reversed) == 32)
-
-    return reversed
-
 class Address:
     """
     Dense address encoding matching Cairo implementation (22 bytes).

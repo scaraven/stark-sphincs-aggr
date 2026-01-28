@@ -52,6 +52,25 @@ pub impl WordSpanImpl of WordSpanTrait {
     fn into_components(self: WordSpan) -> (Span<u32>, u32, u32) {
         (self.input, self.last_input_word, self.last_input_num_bytes)
     }
+
+    fn into_felt252(self: WordSpan) -> Array<felt252> {
+        let (input_span, last_word, last_num_bytes) = self.into_components();
+        let mut array: Array<felt252> = array![];
+
+        for word in input_span {
+            array.append((*word).into());
+        }
+
+        if last_num_bytes == 1 {
+            array.append((last_word * 0x1000000).into());
+        } else if last_num_bytes == 2 {
+            array.append((last_word * 0x10000).into());
+        } else if last_num_bytes == 3 {
+            array.append((last_word * 0x100).into());
+        }
+
+        array
+    }
 }
 
 #[generate_trait]

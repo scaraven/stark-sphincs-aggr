@@ -6,15 +6,15 @@
 pub const SPX_N: usize = 16;
 /// Hash output length in words.
 pub const SPX_HASH_LEN: usize = 4;
-/// Height of the hypertree.
+/// Height of the hypertree. Equivalent to h parameter.
 pub const SPX_FULL_HEIGHT: usize = 63;
-/// Number of subtree layer.
+/// Number of subtree layer. Equivalent to d parameter.
 pub const SPX_D: usize = 7;
-/// FORS tree height.
+/// FORS tree height. Equivalent to a parameter.
 pub const SPX_FORS_HEIGHT: usize = 12;
 /// FORS tree base offset: 1 << SPX_FORS_HEIGHT.
 pub const SPX_FORS_BASE_OFFSET: usize = 4096;
-/// Number of FORS trees.
+/// Number of FORS trees. Equivalent to k parameter.
 pub const SPX_FORS_TREES: usize = 14;
 /// Subtree size.
 pub const SPX_TREE_HEIGHT: usize = SPX_FULL_HEIGHT / SPX_D; // 9

@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use crate::hasher::felt252_to_u32_array;
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, fors_pk_from_sig};
 use crate::hasher::{
@@ -55,7 +56,7 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
     // Split the digest into the message hash, tree address and leaf index.
     let XMessageDigest {
         mhash, mut tree_address, mut leaf_idx,
-    } = split_xdigest_128s(digest.span());
+    } = split_xdigest_128s(digest);
 
     let mut wots_addr: Address = Default::default();
     wots_addr.set_address_type(AddressType::WOTS);
@@ -114,37 +115,49 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
 }
 
 /// Split the extended message digest into the message hash, tree address and leaf index.
-/// NOTE: this is not a generic implementation, rather a shortcut for 128s.
-fn split_xdigest_128s(mut digest: WordSpan) -> XMessageDigest {
-    let (mut words, last_word, _) = digest.into_components();
+/// Note, we work backwards from the least significant bits rather than forwards.
+fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
+    // Split felt252 into u32 words, big-endian
+    let [a, b, c, d, e, f, g, h] = felt252_to_u32_array(digest);
+    println!("Digest words: {:?}", [a, b, c, d, e, f, g, h]);
 
-    // Lead index is the 9 LSB of the last word (which is 2 bytes).
-    let leaf_idx = last_word % 0x200;
-    let leaf_idx: u16 = leaf_idx.try_into().expect('u32 -> u16 cast failed');
+    // Work backwards, take last 9 bits from h as leaf index
+    let (h_rem, leaf_idx) = DivRem::div_rem(h, 0x200);
+    let leaf_idx = leaf_idx.try_into().unwrap();
 
-    // Tree address is the 54 LSB of the last two words.
-    let lo = *words.pop_back().unwrap(); // 32 bits
-    let ahi = *words
-        .pop_back()
-        .unwrap(); // 8 bits (mhash) | 2 bits (discarded) | 22 bits (tree_address)
-    let (a, hi) = DivRem::div_rem(ahi, 0x400000);
-    let tree_address = hi.into() * 0x100000000 + lo.into();
+    // Take the next 54 bits as tree address from h, g
+    // h[16:32] + g[0:32] + f[0:6] = 54 bits
+    let (f_div , f_mod) = DivRem::div_rem(f, 0x40); // 6 bits
+    let tree_address: u64 = (h_rem.into() / 0x80 + g.into() * 0x10000 + f_mod.into() *  0x1000000000000);
 
-    // Message hash is the remaining 21 bytes.
-    let mhash = WordSpanTrait::new(words.into(), a / 0x4, 1);
+    // f[8:32] + e + d + c + b + a[0:16] = message hash
+    // next 21 bytes
+    let (_, a_mod) = DivRem::div_rem(a, 0x10000); // take first 16 bits
+    let (b_rem, b_mod) = DivRem::div_rem(b, 0x10000);
+    let (c_rem, c_mod) = DivRem::div_rem(c, 0x10000);
+    let (d_rem, d_mod) = DivRem::div_rem(d, 0x10000);
+    let (e_rem, e_mod) = DivRem::div_rem(e, 0x10000);
+    let (f_rem, f_mod) = DivRem::div_rem(f, 0x10000);
+    let arr: Array<u32> = array![a_mod * 0x10000 + b_rem, 
+                                b_mod * 0x10000 + c_rem,
+                                c_mod * 0x10000 + d_rem,
+                                d_mod * 0x10000 + e_rem, 
+                                e_mod * 0x10000 + f_rem];
+
+    let mhash = WordSpanTrait::new(arr.span(), f_mod / 0x100, 1);
 
     XMessageDigest { mhash, tree_address, leaf_idx }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::word_array::hex::{words_from_hex, words_to_hex};
+    use crate::word_array::hex::words_to_hex;
     use super::*;
 
     #[test]
     fn test_split_xdigest_128s() {
-        let digest = words_from_hex("5f6f74792de379a6337bbad9e4a1621e38c5e3827d8ae84c41501d68e961");
-        let xdigest = split_xdigest_128s(digest.span());
+        let digest = 0x5f6f74792de379a6337bbad9e4a1621e38c5e3827d8ae84c41501d68e961;
+        let xdigest = split_xdigest_128s(digest);
         assert_eq!(xdigest.leaf_idx, 0x161);
         assert_eq!(xdigest.tree_address, 0xae84c41501d68);
         assert_eq!(words_to_hex(xdigest.mhash), "5f6f74792de379a6337bbad9e4a1621e38c5e3827d");

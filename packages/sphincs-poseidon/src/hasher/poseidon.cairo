@@ -54,12 +54,17 @@ pub fn hash_update_16_finalize(ref state: HashState, data: [felt252; 16]) -> fel
     state.state.finalize()
 }
 
-/// Updates the Poseidon hasher state with the given data (data length must be a multiple of 16).
+/// Updates the Poseidon hasher state with the given data
 pub fn hash_update_block(ref state: HashState, mut data: Span<felt252>) {
     while let Some(chunk) = data.multi_pop_front::<16>() {
         hash_update_16(ref state, chunk.unbox());
     }
-    assert(data.is_empty(), 'unaligned poseidon block');
+    
+
+    // Iterate through remaining elements
+    for word in data {
+        state.state = state.state.update(*word);
+    }
 }
 
 /// Finalizes the Poseidon hasher state and returns the hash.

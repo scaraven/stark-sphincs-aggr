@@ -1,53 +1,47 @@
 #!/usr/bin/env python3
 """
-Generate valid test vectors for SPHINCS+ BTC (Bitcoin-optimized parameters).
+Generate valid test vectors for SPHINCS+ with Poseidon hash.
 
-This implementation exactly matches the Cairo verification logic to produce
-cryptographically valid signatures using Blake2s hash function.
+This implementation uses field elements (felt252) instead of bytes,
+matching the Cairo Poseidon implementation.
 
-Parameters:
-- n=16 (hash output bytes)
-- h=32 (total height)
-- d=4 (hypertree layers)
-- tree_height=8 (per subtree)
-- k=10 (FORS trees)
-- a=14 (FORS height)
-- w=256 (WOTS parameter)
-- hash=Blake2s (STARK-optimized)
+Parameters (matching params_128s.cairo):
+- h=63 (total height)
+- d=7 (hypertree layers)
+- tree_height=9 (per subtree)
+- k=14 (FORS trees)
+- a=12 (FORS height)
+- w=16 (WOTS parameter)
+- hash=Poseidon (arithmetic-friendly)
 """
 
 from typing import List
 from hash import poseidon_hash
-import struct
 import json
 import sys
 
-# === Parameters ===
-SPX_N = 16  # hash output bytes
-SPX_FULL_HEIGHT = 32
-SPX_D = 4
-SPX_TREE_HEIGHT = 8
-SPX_FORS_HEIGHT = 14
-SPX_FORS_TREES = 10
-SPX_FORS_BASE_OFFSET = 1 << SPX_FORS_HEIGHT  # 16384
-SPX_WOTS_W = 256
-SPX_WOTS_LEN1 = 16
-SPX_WOTS_C_LEN = 14  # Without last 2 chains
-SPX_WOTS_C_OMIT = 2
-SPX_WOTS_TARGET_SUM = 2040
-SPX_DGST_BYTES = 30  # mhash(21) + tree_addr(7) + leaf_idx(2)
+# === Parameters (matching params_128s.cairo) ===
+SPX_N = 16  # hash output bytes (for reference, but we use felt252)
+SPX_FULL_HEIGHT = 63
+SPX_D = 7
+SPX_TREE_HEIGHT = 9  # SPX_FULL_HEIGHT / SPX_D
+SPX_FORS_HEIGHT = 12
+SPX_FORS_TREES = 14
+SPX_FORS_BASE_OFFSET = 1 << SPX_FORS_HEIGHT  # 4096
+SPX_FORS_MSG_BYTES = (SPX_FORS_HEIGHT * SPX_FORS_TREES + 7) // 8  # 21
+SPX_TREE_BITS = SPX_TREE_HEIGHT * (SPX_D - 1)  # 54
+SPX_LEAF_BITS = SPX_TREE_HEIGHT  # 9
+SPX_DGST_BYTES = SPX_FORS_MSG_BYTES + (SPX_TREE_BITS + 7) // 8 + (SPX_LEAF_BITS + 7) // 8  # 30
+SPX_WOTS_W = 16
+SPX_WOTS_LOGW = 4
+SPX_WOTS_LEN1 = 8 * SPX_N // SPX_WOTS_LOGW  # 32
+SPX_WOTS_LEN2 = 3  # checksum length
+SPX_WOTS_LEN = SPX_WOTS_LEN1 + SPX_WOTS_LEN2  # 35
 
 class Address:
     """
-    Dense address encoding matching Cairo implementation (22 bytes).
-
-    Layout:
-    - w0 (4 bytes): layer (1 byte) + hypertree_addr high (3 bytes)
-    - w1 (4 bytes): hypertree_addr mid (4 bytes)
-    - w2 (4 bytes): hypertree_addr low (1 byte) + type (1 byte) + padding (2 bytes)
-    - w3 (4 bytes): keypair (2 bytes) + padding (2 bytes)
-    - w4 (4 bytes): padding (1 byte) + tree_height/chain_addr (1 byte) + tree_index_hi (2 bytes)
-    - w5 (2 bytes): tree_index_lo (2 bytes) or hash_addr
+    Dense address encoding matching Cairo implementation.
+    Stores address as 6 u32 words internally, converts to field elements for hashing.
     """
 
     # Address types matching Cairo
@@ -105,11 +99,10 @@ class Address:
     def set_hash_addr(self, h: int):
         self.hash_addr = h & 0xFF
 
-    def to_ints(self) -> List[int]:
+    def to_field_elements(self) -> List[int]:
         """
-        Serialize to 22 bytes matching Cairo's WordArray format.
-
-        Cairo stores: 5 full u32 words + 1 partial word (2 bytes) = 22 bytes
+        Convert address to 6 field elements (one per u32 word).
+        Matches Cairo's dense Address::into_field_components().
         """
         # w0: layer (1 byte) | tree_addr high 3 bytes
         tree_hi = (self.tree_addr >> 40) & 0xFFFFFF
@@ -126,7 +119,6 @@ class Address:
         w3 = self.keypair << 16
 
         # w4: For WOTS addresses use chain_addr, otherwise tree_height
-        # Cairo stores: padding (1 byte) | height/chain (1 byte) | tree_idx high (2 bytes)
         if self.addr_type in (Address.WOTS, Address.WOTSPK):
             height_or_chain = self.chain_addr
         else:
@@ -137,83 +129,102 @@ class Address:
 
         # w5: tree_index low (2 bytes) or hash_addr for WOTS
         if self.addr_type in (Address.WOTS, Address.WOTSPK):
-            w5_2bytes = self.hash_addr & 0xFFFF
+            w5 = self.hash_addr & 0xFFFF
         else:
-            w5_2bytes = self.tree_index & 0xFFFF
+            w5 = self.tree_index & 0xFFFF
 
-        # Pack as 5 u32 words (big-endian) + 2 bytes
-        return [w0, w1, w2, w3, w4, w5_2bytes]
+        # Return as field elements (just the u32 values as ints)
+        return [w0, w1, w2, w3, w4, w5]
 
 
 def thash(pk_seed: int, address: Address, input_data: List[int]) -> int:
     """
-    Tweakable hash matching Cairo's poseidon hash implementation
-    """
-    # Build the full input: pk_seed padded to 64 bytes + address + input
+    Tweakable hash using Poseidon with field elements.
+    Matches Cairo's thash implementation in hasher.cairo:39-44.
 
-    data = [pk_seed] + address.to_ints() + input_data
+    Returns: felt252 (as Python int)
+    """
+    # Get address as 6 field elements
+    addr_fields = address.to_field_elements()
+
+    # Build input: pk_seed, then 6 address components, then data
+    data = [pk_seed] + addr_fields + input_data
+
     return poseidon_hash(data)
 
 
-def compute_modified_message(pk_seed: int, address: Address, message: List[int], counter: int) -> int:
+def felt252_to_u32_array(value: int) -> List[int]:
     """
-    Compute modified message for WOTS+C: H(message || counter).
-    This is the message that must satisfy WOTS+C constraints.
+    Convert felt252 to array of 4 u32 values (little-endian).
+    Matches Cairo's conversion in sphincs.cairo:86-93.
     """
-    # Input: message (16 bytes) || counter (4 bytes)
-    return thash(pk_seed, address, message + [counter])
+    result = []
+    for _ in range(4):
+        result.append(value & 0xFFFFFFFF)
+        value >>= 32
+    return result
 
 
-def check_wots_c_constraints(message_bytes: bytes) -> bool:
+def base_w_128s(input_array: List[int]) -> List[int]:
     """
-    Check if message satisfies WOTS+C constraints:
-    Last SPX_WOTS_C_OMIT (2) bytes must be zero.
-    This allows omitting those chains from the signature.
+    Convert array of u32 values to base-w (w=16) representation.
+    Matches Cairo's base_w_128s in wots.cairo:109-123.
+
+    Each u32 is split into 8 nibbles (4-bit chunks).
+    Returns list of SPX_WOTS_LEN1 = 32 nibbles.
     """
-    # Check last OMIT bytes are zero
-    for i in range(SPX_WOTS_LEN1 - SPX_WOTS_C_OMIT, SPX_WOTS_LEN1):
-        if message_bytes[i] != 0:
-            return False
+    out = []
+    for word in input_array:
+        # Extract 8 nibbles from this u32 (big-endian nibbles)
+        for i in range(7, -1, -1):
+            nibble = (word >> (i * 4)) & 0xF
+            out.append(nibble)
+    return out
 
-    return True
 
-
-def grind_wots_counter(pk_seed: bytes, address: Address, message: bytes) -> tuple:
+def compute_checksum(msg_base_w: List[int]) -> List[int]:
     """
-    Grind to find a counter such that H(message || counter) satisfies WOTS+C constraints.
-    Returns (modified_message, counter).
+    Compute WOTS checksum in base-w.
+    Matches Cairo's wots_pk_from_sig checksum computation.
     """
-    for counter in range(2**32):
-        modified = compute_modified_message(pk_seed, address, message, counter)
-        if check_wots_c_constraints(modified):
-            return modified, counter
-        if counter % 100000 == 0 and counter > 0:
-            print(f"  Grinding counter: {counter}...", file=sys.stderr)
-    raise ValueError("Could not find valid counter (exhausted 2^32 attempts)")
+    csum = 0
+    for digit in msg_base_w:
+        csum += (SPX_WOTS_W - 1) - digit
+
+    # Convert checksum to base-w (SPX_WOTS_LEN2 = 3 digits for W=16)
+    csum_base_w = []
+    for _ in range(SPX_WOTS_LEN2):
+        csum_base_w.append(csum & 0xF)
+        csum >>= 4
+
+    return csum_base_w
 
 
-def chain_hash(pk_seed: bytes, address: Address, input_val: bytes, start: int, steps: int) -> bytes:
-    """WOTS hash chain: hash 'steps' times starting from position 'start'."""
+def chain_hash(pk_seed: int, address: Address, input_val: int, start: int, steps: int) -> int:
+    """
+    WOTS hash chain: hash 'steps' times starting from position 'start'.
+    Works with field elements (felt252).
+    """
     addr = address.copy()
     addr.set_type(Address.WOTS)
     result = input_val
     for i in range(start, start + steps):
         addr.set_hash_addr(i)
-        result = thash(pk_seed, addr, result)
+        result = thash(pk_seed, addr, [result])
     return result
 
 
-def wots_sk(pk_seed: bytes, sk_seed: bytes, address: Address, chain_idx: int) -> bytes:
-    """Derive WOTS secret key for a chain using PRF."""
+def wots_sk(pk_seed: int, sk_seed: int, address: Address, chain_idx: int) -> int:
+    """Derive WOTS secret key for a chain using PRF. Returns felt252."""
     addr = address.copy()
     addr.set_type(Address.WOTSPRF)
     addr.set_chain_addr(chain_idx)
     addr.set_hash_addr(0)
-    return thash(pk_seed, addr, sk_seed)
+    return thash(pk_seed, addr, [sk_seed])
 
 
-def wots_pk_chain(pk_seed: bytes, sk_seed: bytes, address: Address, chain_idx: int) -> bytes:
-    """Compute single WOTS public key chain element."""
+def wots_pk_chain(pk_seed: int, sk_seed: int, address: Address, chain_idx: int) -> int:
+    """Compute single WOTS public key chain element. Returns felt252."""
     sk = wots_sk(pk_seed, sk_seed, address, chain_idx)
     addr = address.copy()
     addr.set_type(Address.WOTS)
@@ -221,35 +232,50 @@ def wots_pk_chain(pk_seed: bytes, sk_seed: bytes, address: Address, chain_idx: i
     return chain_hash(pk_seed, addr, sk, 0, SPX_WOTS_W - 1)
 
 
-def wots_pk(pk_seed: bytes, sk_seed: bytes, address: Address) -> bytes:
+def wots_pk(pk_seed: int, sk_seed: int, address: Address) -> List[int]:
     """
-    Compute WOTS+C public key (concatenation of first SPX_WOTS_C_LEN=14 chain endpoints).
-    For WOTS+C, only the signed chains are used in the public key tree.
+    Compute WOTS public key (all SPX_WOTS_LEN=35 chain endpoints).
+    Returns list of felt252 values.
     """
     pk_parts = []
-    for i in range(SPX_WOTS_C_LEN):  # Only 14 chains, not 16
+    for i in range(SPX_WOTS_LEN):
         pk_i = wots_pk_chain(pk_seed, sk_seed, address, i)
         pk_parts.append(pk_i)
-    return b''.join(pk_parts)
+    return pk_parts
 
 
-def wots_pk_compressed(pk_seed: bytes, sk_seed: bytes, address: Address) -> bytes:
-    """Compute compressed WOTS+C public key (thash of first 14 chains only)."""
-    pk_concat = wots_pk(pk_seed, sk_seed, address)
+def wots_pk_compressed(pk_seed: int, sk_seed: int, address: Address) -> int:
+    """Compute compressed WOTS public key (hash of all chains). Returns felt252."""
+    pk_list = wots_pk(pk_seed, sk_seed, address)
     addr = address.copy()
     addr.set_type(Address.WOTSPK)
-    return thash(pk_seed, addr, pk_concat)
+    return thash(pk_seed, addr, pk_list)
 
 
-def wots_sign(pk_seed: bytes, sk_seed: bytes, modified_message: bytes, address: Address) -> list:
+def wots_sign(pk_seed: int, sk_seed: int, message_root: int, address: Address) -> List[int]:
     """
-    Sign with WOTS using the modified message (after grinding).
-    Returns list of signature chain values (first SPX_WOTS_C_LEN chains only).
+    Sign with WOTS using standard W=16 with checksum.
+
+    Args:
+        message_root: felt252 value to sign
+
+    Returns: list of SPX_WOTS_LEN=35 felt252 signature values
     """
-    digits = list(modified_message)
+    # Convert message to u32 array (little-endian)
+    msg_u32 = felt252_to_u32_array(message_root)
+
+    # Convert to base-w
+    msg_base_w = base_w_128s(msg_u32)
+
+    # Compute checksum
+    checksum = compute_checksum(msg_base_w)
+
+    # Full message with checksum
+    digits = msg_base_w + checksum
+
+    # Generate signature chains
     sig_chains = []
-
-    for i in range(SPX_WOTS_C_LEN):
+    for i in range(SPX_WOTS_LEN):
         sk = wots_sk(pk_seed, sk_seed, address, i)
         addr = address.copy()
         addr.set_type(Address.WOTS)
@@ -261,29 +287,29 @@ def wots_sign(pk_seed: bytes, sk_seed: bytes, modified_message: bytes, address: 
     return sig_chains
 
 
-def fors_sk_leaf(pk_seed: bytes, sk_seed: bytes, address: Address, tree_idx: int, leaf_idx: int) -> bytes:
-    """Derive FORS secret key for a leaf."""
+def fors_sk_leaf(pk_seed: int, sk_seed: int, address: Address, tree_idx: int, leaf_idx: int) -> int:
+    """Derive FORS secret key for a leaf. Returns felt252."""
     addr = address.copy()
     addr.set_type(Address.FORSPRF)
     idx = tree_idx * SPX_FORS_BASE_OFFSET + leaf_idx
     addr.set_tree_index(idx)
-    return thash(pk_seed, addr, sk_seed)
+    return thash(pk_seed, addr, [sk_seed])
 
 
-def fors_leaf_hash(pk_seed: bytes, sk_seed: bytes, address: Address, tree_idx: int, leaf_idx: int) -> bytes:
-    """Compute FORS leaf hash."""
+def fors_leaf_hash(pk_seed: int, sk_seed: int, address: Address, tree_idx: int, leaf_idx: int) -> int:
+    """Compute FORS leaf hash. Returns felt252."""
     sk = fors_sk_leaf(pk_seed, sk_seed, address, tree_idx, leaf_idx)
     addr = address.copy()
     addr.set_type(Address.FORSTREE)
     addr.set_tree_height(0)
     idx = tree_idx * SPX_FORS_BASE_OFFSET + leaf_idx
     addr.set_tree_index(idx)
-    return thash(pk_seed, addr, sk)
+    return thash(pk_seed, addr, [sk])
 
 
-def fors_treehash(pk_seed: bytes, sk_seed: bytes, address: Address,
-                  tree_idx: int, start_idx: int, height: int) -> bytes:
-    """Compute FORS subtree root using treehash."""
+def fors_treehash(pk_seed: int, sk_seed: int, address: Address,
+                  tree_idx: int, start_idx: int, height: int) -> int:
+    """Compute FORS subtree root using treehash. Returns felt252."""
     if height == 0:
         return fors_leaf_hash(pk_seed, sk_seed, address, tree_idx, start_idx)
 
@@ -296,12 +322,12 @@ def fors_treehash(pk_seed: bytes, sk_seed: bytes, address: Address,
     base = tree_idx * SPX_FORS_BASE_OFFSET
     addr.set_tree_index((base >> height) + (start_idx >> height))
 
-    return thash(pk_seed, addr, left + right)
+    return thash(pk_seed, addr, [left, right])
 
 
-def fors_gen_auth(pk_seed: bytes, sk_seed: bytes, address: Address,
-                  tree_idx: int, leaf_idx: int) -> list:
-    """Generate FORS authentication path for a leaf."""
+def fors_gen_auth(pk_seed: int, sk_seed: int, address: Address,
+                  tree_idx: int, leaf_idx: int) -> List[int]:
+    """Generate FORS authentication path for a leaf. Returns list of felt252."""
     auth = []
     for h in range(SPX_FORS_HEIGHT):
         sibling_idx = (leaf_idx >> h) ^ 1
@@ -311,13 +337,13 @@ def fors_gen_auth(pk_seed: bytes, sk_seed: bytes, address: Address,
     return auth
 
 
-def fors_tree_root(pk_seed: bytes, sk_seed: bytes, address: Address, tree_idx: int) -> bytes:
-    """Compute root of a single FORS tree."""
+def fors_tree_root(pk_seed: int, sk_seed: int, address: Address, tree_idx: int) -> int:
+    """Compute root of a single FORS tree. Returns felt252."""
     return fors_treehash(pk_seed, sk_seed, address, tree_idx, 0, SPX_FORS_HEIGHT)
 
 
-def fors_pk(pk_seed: bytes, sk_seed: bytes, address: Address) -> bytes:
-    """Compute FORS public key (hash of all tree roots)."""
+def fors_pk(pk_seed: int, sk_seed: int, address: Address) -> int:
+    """Compute FORS public key (hash of all tree roots). Returns felt252."""
     roots = []
     for tree_idx in range(SPX_FORS_TREES):
         root = fors_tree_root(pk_seed, sk_seed, address, tree_idx)
@@ -325,38 +351,52 @@ def fors_pk(pk_seed: bytes, sk_seed: bytes, address: Address) -> bytes:
 
     addr = address.copy()
     addr.set_type(Address.FORSPK)
-    return thash(pk_seed, addr, b''.join(roots))
+    return thash(pk_seed, addr, roots)
 
 
-def message_to_indices(mhash: bytes) -> list:
+def felt252_to_wordspan_bytes(value: int, num_bytes: int) -> List[int]:
     """
-    Convert FORS message hash to leaf indices (14 bits each, k=10 indices).
-    Must match Cairo's message_to_indices_btc exactly.
-
-    Cairo processes bytes from the beginning (big-endian) and accumulates
-    bits until it has 14 bits, then extracts an index.
+    Convert felt252 to list of bytes (as ints 0-255) for message_to_indices.
+    Little-endian byte order.
     """
+    bytes_list = []
+    for _ in range(num_bytes):
+        bytes_list.append(value & 0xFF)
+        value >>= 8
+    return bytes_list
+
+
+def message_to_indices(mhash_felt: int) -> List[int]:
+    """
+    Convert FORS message hash (felt252) to leaf indices (12 bits each, k=14 indices).
+    Must match Cairo's message_to_indices_128s.
+
+    Cairo processes WordSpan in little-endian byte order.
+    """
+    # Convert felt252 to bytes (little-endian)
+    mhash_bytes = felt252_to_wordspan_bytes(mhash_felt, SPX_FORS_MSG_BYTES)
+
     indices = []
     acc = 0
     acc_bits = 0
     byte_idx = 0
 
-    while len(indices) < SPX_FORS_TREES and byte_idx < len(mhash):
-        # Read next byte
-        byte_val = mhash[byte_idx]
+    while len(indices) < SPX_FORS_TREES and byte_idx < len(mhash_bytes):
+        # Read next byte (little-endian)
+        byte_val = mhash_bytes[byte_idx]
         byte_idx += 1
 
         # Accumulate: shift left by 8 and add new byte
         acc = (acc << 8) | byte_val
         acc_bits += 8
 
-        # Extract 14-bit indices while we have enough bits
-        while acc_bits >= 14 and len(indices) < SPX_FORS_TREES:
-            shift_amount = acc_bits - 14
-            idx = (acc >> shift_amount) & 0x3FFF  # 14-bit mask
+        # Extract 12-bit indices while we have enough bits
+        while acc_bits >= 12 and len(indices) < SPX_FORS_TREES:
+            shift_amount = acc_bits - 12
+            idx = (acc >> shift_amount) & 0xFFF  # 12-bit mask
             indices.append(idx)
             acc = acc & ((1 << shift_amount) - 1)  # Keep remaining bits
-            acc_bits -= 14
+            acc_bits -= 12
 
     # Pad with zeros if we don't have enough indices
     while len(indices) < SPX_FORS_TREES:
@@ -365,8 +405,15 @@ def message_to_indices(mhash: bytes) -> list:
     return indices
 
 
-def fors_sign(pk_seed: bytes, sk_seed: bytes, mhash: bytes, address: Address) -> list:
-    """Generate FORS signature."""
+def fors_sign(pk_seed: int, sk_seed: int, mhash: int, address: Address) -> List[tuple]:
+    """
+    Generate FORS signature.
+
+    Args:
+        mhash: felt252 message hash
+
+    Returns: list of (sk, auth_path) tuples, each element is felt252
+    """
     indices = message_to_indices(mhash)
 
     tree_sigs = []
@@ -384,16 +431,16 @@ def fors_sign(pk_seed: bytes, sk_seed: bytes, mhash: bytes, address: Address) ->
     return tree_sigs
 
 
-def ht_leaf(pk_seed: bytes, sk_seed: bytes, address: Address, leaf_idx: int) -> bytes:
-    """Compute hypertree leaf (compressed WOTS pk)."""
+def ht_leaf(pk_seed: int, sk_seed: int, address: Address, leaf_idx: int) -> int:
+    """Compute hypertree leaf (compressed WOTS pk). Returns felt252."""
     addr = address.copy()
     addr.set_keypair(leaf_idx)
     return wots_pk_compressed(pk_seed, sk_seed, addr)
 
 
-def ht_treehash(pk_seed: bytes, sk_seed: bytes, address: Address,
-                start_idx: int, height: int) -> bytes:
-    """Compute subtree root."""
+def ht_treehash(pk_seed: int, sk_seed: int, address: Address,
+                start_idx: int, height: int) -> int:
+    """Compute subtree root. Returns felt252."""
     if height == 0:
         return ht_leaf(pk_seed, sk_seed, address, start_idx)
 
@@ -404,14 +451,13 @@ def ht_treehash(pk_seed: bytes, sk_seed: bytes, address: Address,
     addr.set_type(Address.HASHTREE)
     addr.set_tree_height(height)
     addr.set_tree_index(start_idx >> height)
-    # Clear keypair - internal nodes don't use it (Cairo compute_root uses keypair=0)
     addr.set_keypair(0)
 
-    return thash(pk_seed, addr, left + right)
+    return thash(pk_seed, addr, [left, right])
 
 
-def ht_gen_auth(pk_seed: bytes, sk_seed: bytes, address: Address, leaf_idx: int) -> list:
-    """Generate authentication path for hypertree layer."""
+def ht_gen_auth(pk_seed: int, sk_seed: int, address: Address, leaf_idx: int) -> List[int]:
+    """Generate authentication path for hypertree layer. Returns list of felt252."""
     auth = []
     for h in range(SPX_TREE_HEIGHT):
         sibling_idx = (leaf_idx >> h) ^ 1
@@ -421,82 +467,91 @@ def ht_gen_auth(pk_seed: bytes, sk_seed: bytes, address: Address, leaf_idx: int)
     return auth
 
 
-def hash_message(randomizer: int, pk_seed: int, pk_root: int,
-                 message: List[int]) -> int:
+def hash_message(randomizer: int, pk_seed: int, pk_root: int, message: List[int]) -> int:
     """
-    Hash message to get extended digest (SPX_DGST_BYTES = 22 bytes).
+    Hash message to get extended digest.
+    Matches Cairo's hash_message_128s in hasher.cairo:68-99.
+
+    Returns: felt252
     """
-    # First hash: H(R || pk_seed || pk_root || message)
+    # First stage: Hash(randomizer || pk_seed || pk_root || message)
     seed = poseidon_hash([randomizer, pk_seed, pk_root] + message)
 
-    # MGF1 expansion: H(R || pk_seed || seed || counter=0)
+    # Second stage (MGF1): Hash(randomizer || pk_seed || seed || 0)
     expanded = poseidon_hash([randomizer, pk_seed, seed, 0])
 
     return expanded
 
 
 def split_digest(digest: int) -> tuple:
-    """Split extended digest into mhash, tree_addr, leaf_idx."""
-    # digest is 30 bytes:
-    # - mhash: 21 bytes (for k=10, a=14: 140 bits)
-    # - tree_addr: 7 bytes (54 bits)
-    # - leaf_idx: 2 byte (9 bits)
-    # - mhash | 2 discarded bits | tree_addr | 7 discarded bits | leaf_idx
+    """
+    Split extended digest into mhash, tree_addr, leaf_idx.
+    Must match Cairo's split_xdigest_128s in sphincs.cairo:117-147.
 
-    leaf_idx = digest & 0x1FF  # 9 bits
-    digest >>= 16
+    Returns: (mhash: felt252, tree_addr: int, leaf_idx: int)
+    """
+    # Convert to u32 array (big-endian)
+    def felt252_to_u32_array_be(value: int) -> List[int]:
+        # Convert to u256 first
+        u256_val = value & ((1 << 256) - 1)
+        result = []
+        for _ in range(8):
+            result.append((u256_val >> 224) & 0xFFFFFFFF)
+            u256_val <<= 32
+        return result
 
-    tree_addr = digest & 0x3FFFFFFFFFFFFF  # 54 bits
-    digest >>= 56
+    arr = felt252_to_u32_array_be(digest)
+    a, b, c, d, e, f, g, h = arr
 
-    return digest, tree_addr, leaf_idx
+    # Work backwards from least significant bits
+    # Take last 9 bits from h as leaf index
+    leaf_idx = h & 0x1FF
+    h_rem = h >> 9
+
+    # Take next 54 bits as tree address from h, g, f
+    # h[16:32] + g[0:32] + f[0:6] = 54 bits
+    f_mod = f & 0x3F  # 6 bits
+    tree_address = (h_rem // 0x80) + (g * 0x10000) + (f_mod * 0x1000000000000)
+
+    # f[8:32] + e + d + c + b + a[0:16] = message hash (21 bytes)
+    a_mod = a & 0xFFFF
+
+    # Reconstruct mhash as felt252
+    # Take bits: a[0:16] + b + c + d + e + f[6:32]
+    f_hi = f >> 8  # upper 24 bits of f
+    e_full = e
+    d_full = d
+    c_full = c
+    b_full = b
+    a_lo = a_mod
+
+    # Build 21-byte (168-bit) value
+    mhash = (a_lo << 152) | (b_full << 120) | (c_full << 88) | (d_full << 56) | (e_full << 24) | f_hi
+
+    return mhash, tree_address, leaf_idx
 
 
-# Convert bytes to list of u32 values (little-endian)
-# This is used for interfacing with blake2s hashlib
-def bytes_to_u32s_little(data: bytes) -> list:
-    """Convert bytes to list of u32 values"""
-    result = []
-    for i in range(0, len(data), 4):
-        chunk = data[i:i+4]
-        if len(chunk) < 4:
-            chunk = chunk + b'\x00' * (4 - len(chunk))
-        result.append(struct.unpack("<I", chunk)[0])
-    return result
-
-# --- Helper to convert bytes to big-endian u32s for Cairo output ---
-def bytes_to_u32s(data: bytes) -> list:
-    """Convert bytes to list of u32 values"""
-    result = []
-    for i in range(0, len(data), 4):
-        chunk = data[i:i+4]
-        if len(chunk) < 4:
-            chunk = b'\x00' * (4 - len(chunk)) + chunk
-        result.append(struct.unpack(">I", chunk)[0])
-    return result
-
-
-class SphinxBtcSigner:
-    """Complete SPHINCS+ BTC signer with WOTS+C grinding."""
+class SphincsPoseidonSigner:
+    """Complete SPHINCS+ Poseidon signer (no grinding, standard WOTS+)."""
 
     def __init__(self, sk_seed: int, pk_seed: int):
         self.sk_seed = sk_seed
         self.pk_seed = pk_seed
 
-        # Compute public key root (this is expensive - computes full hypertree)
+        # Compute public key root
         print("Computing public key root (this may take a while)...", file=sys.stderr)
         self.pk_root = self._compute_pk_root()
-        print(f"Public key root: {self.pk_root.hex()}", file=sys.stderr)
+        print(f"Public key root: {hex(self.pk_root)}", file=sys.stderr)
 
-    def _compute_pk_root(self) -> bytes:
-        """Compute the top-level root of the hypertree."""
+    def _compute_pk_root(self) -> int:
+        """Compute the top-level root of the hypertree. Returns felt252."""
         addr = Address()
         addr.set_layer(SPX_D - 1)
         addr.set_tree_addr(0)
         return ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
 
     def sign(self, message: List[int]) -> dict:
-        """Sign a message with full SPHINCS+ BTC signature."""
+        """Sign a message with full SPHINCS+ signature."""
         # Generate randomizer (deterministic for reproducibility)
         randomizer = poseidon_hash([self.sk_seed] + message)
 
@@ -519,9 +574,9 @@ class SphinxBtcSigner:
 
         # Compute FORS public key (this is what layer 0 WOTS signs)
         fors_root = fors_pk(self.pk_seed, self.sk_seed, fors_addr)
-        print(f"FORS root: {fors_root.hex()}", file=sys.stderr)
+        print(f"FORS root: {hex(fors_root)}", file=sys.stderr)
 
-        # WOTS+C signatures for each hypertree layer
+        # WOTS signatures for each hypertree layer
         wots_sigs = []
         current_tree_addr = tree_addr
         current_leaf_idx = leaf_idx
@@ -537,15 +592,8 @@ class SphinxBtcSigner:
             addr.set_keypair(current_leaf_idx)
             addr.set_type(Address.WOTS)
 
-            # Grind for valid counter
-            print(f"  Grinding for WOTS+C counter...", file=sys.stderr)
-            modified_message, counter = grind_wots_counter(
-                self.pk_seed, addr, current_root
-            )
-            print(f"  Found counter: {counter}", file=sys.stderr)
-
-            # Sign with WOTS using modified message
-            sig_chains = wots_sign(self.pk_seed, self.sk_seed, modified_message, addr)
+            # Sign with WOTS (standard W=16 with checksum)
+            sig_chains = wots_sign(self.pk_seed, self.sk_seed, current_root, addr)
 
             # Generate auth path for this layer
             addr.set_type(Address.HASHTREE)
@@ -553,15 +601,14 @@ class SphinxBtcSigner:
 
             wots_sigs.append({
                 'chains': sig_chains,
-                'counter': counter,
                 'auth_path': auth_path
             })
 
             # Compute this layer's root for next iteration
             if layer < SPX_D - 1:
                 current_root = ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
-                current_leaf_idx = current_tree_addr & 0xFF
-                current_tree_addr >>= 8
+                current_leaf_idx = current_tree_addr & ((1 << SPX_TREE_HEIGHT) - 1)
+                current_tree_addr >>= SPX_TREE_HEIGHT
 
         return {
             'randomizer': randomizer,
@@ -570,129 +617,52 @@ class SphinxBtcSigner:
         }
 
 
-def serialize_test_vector(sig: dict, pk_seed: bytes, pk_root: bytes, message: bytes) -> list:
-    """Serialize to Cairo-compatible format (list of felt252 values)."""
-    result = []
+def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int, message: List[int]) -> dict:
+    """Serialize to Cairo-compatible JSON format (all field elements as hex strings)."""
+    result = {
+        "pk_seed": hex(pk_seed),
+        "pk_root": hex(pk_root),
+        "randomizer": hex(sig['randomizer']),
+        "fors_sig": [],
+        "wots_sigs": [],
+        "message": [hex(m) for m in message]
+    }
 
-    # === Public key ===
-    result.extend(bytes_to_u32s(pk_seed))
-    result.extend(bytes_to_u32s(pk_root))
+    # FORS signature: 14 trees * (sk + 12 auth_path entries)
+    for sk, auth in sig['fors_sig']:
+        result["fors_sig"].append({
+            "sk": hex(sk),
+            "auth_path": [hex(a) for a in auth]
+        })
 
-    # === Signature ===
-    # Randomizer (16 bytes = 4 u32)
-    result.extend(bytes_to_u32s(sig['randomizer']))
-
-    # FORS signature: 10 trees * (sk_seed + 14 auth_path entries)
-    for tree_sig in sig['fors_sig']:
-        sk, auth = tree_sig
-        result.extend(bytes_to_u32s(sk))  # 4 u32
-        for a in auth:
-            result.extend(bytes_to_u32s(a))  # 14 * 4 u32
-
-    # WOTS+C Merkle signatures: 4 layers
+    # WOTS Merkle signatures: 7 layers
     for wots_sig in sig['wots_sigs']:
-        # 14 chains (each 16 bytes = 4 u32)
-        for chain_val in wots_sig['chains']:
-            result.extend(bytes_to_u32s(chain_val))
-        # Counter (1 u32)
-        result.append(wots_sig['counter'])
-        # 8 auth path entries (each 16 bytes = 4 u32)
-        for auth in wots_sig['auth_path']:
-            result.extend(bytes_to_u32s(auth))
-
-    # === Message as WordArray ===
-    msg_len = len(message)
-    full_words = msg_len // 4
-    remaining = msg_len % 4
-
-    words = []
-    for i in range(full_words):
-        words.append(struct.unpack(">I", message[i*4:(i+1)*4])[0])
-
-    last_word = 0
-    if remaining > 0:
-        for b in message[full_words*4:]:
-            last_word = (last_word << 8) | b
-
-    result.append(len(words))  # Array length
-    result.extend(words)
-    result.append(last_word)
-    result.append(remaining)
+        result["wots_sigs"].append({
+            "chains": [hex(c) for c in wots_sig['chains']],
+            "auth_path": [hex(a) for a in wots_sig['auth_path']]
+        })
 
     return result
 
-
-def serialize_multi_sig_vector(sigs: list, pk_seed: bytes, pk_root: bytes, messages: list) -> list:
-    """Serialize multiple signatures to Cairo-compatible format."""
-    result = []
-    
-    # === Public key (shared for all signatures) ===
-    result.extend(bytes_to_u32s(pk_seed))
-    result.extend(bytes_to_u32s(pk_root))
-    
-    # === Number of signatures ===
-    result.append(len(sigs))
-    
-    # === Each signature ===
-    for sig, message in zip(sigs, messages):
-        # Randomizer (16 bytes = 4 u32)
-        result.extend(bytes_to_u32s(sig['randomizer']))
-        
-        # FORS signature: 10 trees * (sk_seed + 14 auth_path entries)
-        for tree_sig in sig['fors_sig']:
-            sk, auth = tree_sig
-            result.extend(bytes_to_u32s(sk))  # 4 u32
-            for a in auth:
-                result.extend(bytes_to_u32s(a))  # 14 * 4 u32
-        
-        # WOTS+C Merkle signatures: 4 layers
-        for wots_sig in sig['wots_sigs']:
-            # 14 chains (each 16 bytes = 4 u32)
-            for chain_val in wots_sig['chains']:
-                result.extend(bytes_to_u32s(chain_val))
-            # Counter (1 u32)
-            result.append(wots_sig['counter'])
-            # 8 auth path entries (each 16 bytes = 4 u32)
-            for auth in wots_sig['auth_path']:
-                result.extend(bytes_to_u32s(auth))
-        
-        # === Message as WordArray ===
-        msg_len = len(message)
-        full_words = msg_len // 4
-        remaining = msg_len % 4
-        
-        words = []
-        for i in range(full_words):
-            words.append(struct.unpack(">I", message[i*4:(i+1)*4])[0])
-        
-        last_word = 0
-        if remaining > 0:
-            for b in message[full_words*4:]:
-                last_word = (last_word << 8) | b
-        
-        result.append(len(words))  # Array length
-        result.extend(words)
-        result.append(last_word)
-        result.append(remaining)
-    
-    return result
 
 def main():
-    """
-    let randomizer = 0xdeadbeef;
-        let pk_seed = 0xcafebabe;
-        let pk_root = 0xfeedface;
-
-        let message = WordArrayTrait::new(array![0x11111111, 0x22222222, 0x33333333], 0, 0);
-        let digest = hash_message_128s(randomizer, pk_seed, pk_root, message.span());
-    """
+    """Generate test signature."""
+    # Test values from Cairo test
     randomizer = 0xdeadbeef
     pk_seed = 0xcafebabe
-    pk_root = 0xfeedface
+    sk_seed = 0xfeedface
 
     message = [0x11111111, 0x22222222, 0x33333333]
-    digest = hash_message(randomizer, pk_seed, pk_root, message)
-    print(digest)
+
+    # Test hash_message
+    digest = hash_message(randomizer, pk_seed, 0xfeedface, message)
+    print(f"Test digest: {hex(digest)}")
+
+    # Test split_digest
+    mhash, tree_addr, leaf_idx = split_digest(digest)
+    print(f"mhash: {hex(mhash)}")
+    print(f"tree_addr: {tree_addr}")
+    print(f"leaf_idx: {leaf_idx}")
 
 
 if __name__ == "__main__":

@@ -33,8 +33,7 @@ pub fn hash_update_16(ref state: HashState, data: [felt252; 16]) {
 pub fn hash_update_block(ref state: HashState, mut data: Span<felt252>) {
     while let Some(chunk) = data.multi_pop_front::<16>() {
         hash_update_16(ref state, chunk.unbox());
-    }
-    
+    }  
 
     // Iterate through remaining elements
     for word in data {

@@ -4,11 +4,12 @@
 
 // Available hash functions.
 mod poseidon;
+use core::hash::HashStateExTrait;
 use core::hash::HashStateTrait;
 
 // Poseidon backend (arithmetic-friendly).
 use poseidon::{
-    HashState, hash_init, hash_update_block, hash_finalize,
+    HashState, hash_init, hash_finalize,
 };
 
 // Imports.
@@ -38,7 +39,7 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
 pub fn thash(ctx: SpxCtx, address: @Address, data: Span<felt252>) -> HashOutput {
     let [a0, a1, a2, a3, a4, a5] = address.into_field_components();
     let mut state = ctx.state_seeded;
-    hash_update_block(ref state, [a0, a1, a2, a3, a4, a5].span());
+    state.state = state.state.update_with([a0, a1, a2, a3, a4, a5]);
     hash_finalize(ref state, data)
 }
 

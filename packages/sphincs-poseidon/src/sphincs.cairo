@@ -117,7 +117,6 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
 fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
     // Split felt252 into u32 words, big-endian
     let [a, b, c, d, e, f, g, h] = felt252_to_u32_array(digest);
-    println!("Digest words: {:?}", [a, b, c, d, e, f, g, h]);
 
     // Work backwards, take last 9 bits from h as leaf index
     let (h_rem, leaf_idx) = DivRem::div_rem(h, 0x200);

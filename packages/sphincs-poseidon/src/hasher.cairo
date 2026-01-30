@@ -164,8 +164,8 @@ mod tests {
         let value: felt252 = 0x0123456890abcdef0123456890abcdef0123456890abcdef0123456890abcde;
         let arr = felt252_to_u32_array(value);
         assert_eq!(arr, 
-            [0x01234568, 0x90abcdef, 0x01234568, 0x90abcdef,
-             0x01234568, 0x90abcdef, 0x01234568, 0x90abcde]);
+            [0x0123456, 0x890abcde, 0xf0123456, 0x890abcde,
+             0xf0123456, 0x890abcde, 0xf0123456, 0x890abcde]);
     }
 
     #[test]
@@ -207,8 +207,6 @@ mod tests {
         address.set_hypertree_layer(0x01);
         address.set_address_type(AddressType::HASHTREE);
         address.set_keypair(0x3456);
-
-        println!("Address components: {:?}", address.into_field_components());
 
         let ctx = initialize_hash_function(pk_seed);
         

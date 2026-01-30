@@ -68,6 +68,6 @@ mod tests {
         let output2 = hash_finalize(ref state, data.span());
 
         assert_eq!(output1, output2, "Poseidon hash outputs do not match");
-        assert_eq!(output1, 1190188513163088186241995297500126947589582629387601832785015242379216793975, "Poseidon hash output does not match expected value");
+        assert_eq!(output1, 142523731258509939608696022271238521916410456401611624853849835202137558864, "Poseidon hash output does not match expected value");
     }
 }

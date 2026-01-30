@@ -30,32 +30,22 @@ pub fn hash_update_16(ref state: HashState, data: [felt252; 16]) {
 }
 
 #[inline]
-pub fn hash_update_5(ref state: HashState, data: [felt252; 5]) {
+pub fn hash_update_8(ref state: HashState, data: [felt252; 8]) {
     state.state = state.state.update_with(data);
 }
 
 #[inline]
-pub fn hash_update_4(ref state: HashState, data: [felt252; 4]) {
+pub fn hash_update_7(ref state: HashState, data: [felt252; 7]) {
     state.state = state.state.update_with(data);
 }
 
-#[inline]
-pub fn hash_update_3(ref state: HashState, data: [felt252; 3]) {
-    state.state = state.state.update_with(data);
-}
-
-pub fn hash_update_5_finalize(ref state: HashState, data: [felt252; 5]) -> felt252 {
-    hash_update_5(ref state, data);
+pub fn hash_update_8_finalize(ref state: HashState, data: [felt252; 8]) -> felt252 {
+    hash_update_8(ref state, data);
     state.state.finalize()
 }
 
-pub fn hash_update_4_finalize(ref state: HashState, data: [felt252; 4]) -> felt252 {
-    hash_update_4(ref state, data);
-    state.state.finalize()
-}
-
-pub fn hash_update_3_finalize(ref state: HashState, data: [felt252; 3]) -> felt252 {
-    hash_update_3(ref state, data);
+pub fn hash_update_7_finalize(ref state: HashState, data: [felt252; 7]) -> felt252 {
+    hash_update_7(ref state, data);
     state.state.finalize()
 }
 
@@ -88,17 +78,17 @@ mod tests {
         // get the same result as hashing all 5 at once.
         let mut state: HashState = Default::default();
 
-        let data: [felt252; 4] = [1, 2, 3, 4];
-        hash_update_4(ref state, data);
-        state.state = state.state.update(5);
+        let data: [felt252; 7] = [1, 2, 3, 4, 5, 6, 7];
+        hash_update_7(ref state, data);
+        state.state = state.state.update(8);
 
         let output1 = state.state.finalize();
 
         let mut state = Default::default();
-        let data: [felt252; 5] = [1, 2, 3, 4, 5];
-        let output2 = hash_update_5_finalize(ref state, data);
+        let data: [felt252; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+        let output2 = hash_update_8_finalize(ref state, data);
 
         assert_eq!(output1, output2, "Poseidon hash outputs do not match");
-        assert_eq!(output1, 611250879885582549814822745980582240134120981459161846704834910080944450980, "Poseidon hash output does not match expected value");
+        assert_eq!(output1, 142523731258509939608696022271238521916410456401611624853849835202137558864, "Poseidon hash output does not match expected value");
     }
 }

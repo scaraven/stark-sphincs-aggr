@@ -206,7 +206,6 @@ pub mod hex {
             hex_char - 87
         } else {
             panic!("Invalid hex character: {hex_char}");
-            0
         }
     }
 }

@@ -9,7 +9,7 @@ use crate::hasher::{
     HashOutput, compute_root, hash_message_128s, initialize_hash_function, thash_140,
 };
 use crate::params_128s::{SPX_D, SPX_DGST_BYTES, SPX_TREE_HEIGHT};
-use crate::word_array::{WordArrayTrait, WordSpan, WordSpanTrait};
+use crate::word_array::{WordSpan, WordSpanTrait};
 use crate::wots::{WotsSignature, WotsSignatureDefault, WotsSignatureSerde, wots_pk_from_sig};
 
 #[derive(Drop, Serde, Default, Copy)]
@@ -127,7 +127,7 @@ fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
 
     // Take the next 54 bits as tree address from h, g
     // h[16:32] + g[0:32] + f[0:6] = 54 bits
-    let (f_div , f_mod) = DivRem::div_rem(f, 0x40); // 6 bits
+    let (_f_div , f_mod) = DivRem::div_rem(f, 0x40); // 6 bits
     let tree_address: u64 = (h_rem.into() / 0x80 + g.into() * 0x10000 + f_mod.into() *  0x1000000000000);
 
     // f[8:32] + e + d + c + b + a[0:16] = message hash

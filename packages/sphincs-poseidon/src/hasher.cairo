@@ -4,18 +4,18 @@
 
 // Available hash functions.
 mod poseidon;
+use core::hash::HashStateExTrait;
 use core::hash::HashStateTrait;
 
 // Poseidon backend (arithmetic-friendly).
 pub use poseidon::hash_update_16_finalize;
 use poseidon::{
-    HashState, hash_init, hash_update_16, hash_update_3_finalize, hash_update_4_finalize,
-    hash_update_5_finalize,
+    HashState, hash_init, hash_update_16, hash_update_7_finalize, hash_update_8_finalize,
 };
 
 // Imports.
 use crate::address::{Address, AddressTrait};
-use crate::word_array::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
+use crate::word_array::{WordSpan, WordSpanTrait};
 
 /// Hash output.
 /// This encodes a [u32; 4] as a felt252 in little-endian
@@ -38,32 +38,26 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
 
 /// Poseidon-backed thash for 1 input field element.
 pub fn thash_single(ctx: SpxCtx, address: @Address, data: felt252) -> HashOutput {
-    let (a0, a1) = address.into_fields();
+    let [a0, a1, a2, a3, a4, a5] = address.into_field_components();
     let mut state = ctx.state_seeded;
-    hash_update_3_finalize(ref state, [a0, a1, data])
+    hash_update_7_finalize(ref state, [a0, a1, a2, a3, a4, a5, data])
 }
 
 /// Poseidon-backed thash for 2 input words
 pub fn thash_8(ctx: SpxCtx, address: @Address, word0: felt252, word1: felt252) -> HashOutput {
-    let (a0, a1) = address.into_fields();
+    let [a0, a1, a2, a3, a4, a5] = address.into_field_components();
     let mut state = ctx.state_seeded;
-    hash_update_4_finalize(ref state, [a0, a1, word0, word1])
+    hash_update_8_finalize(ref state, [a0, a1, a2, a3, a4, a5, word0, word1])
 }
 
 /// Poseidon-backed thash for FORS public key hashing.
 pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> HashOutput {
     let mut state = ctx.state_seeded;
-    let (a0, a1) = address.into_fields();
+    let [a0, a1, a2, a3, a4, a5,] = address.into_field_components();
 
     assert(data.len() == 35, 'thash_140: expected len = 35');
 
-    // Do initial update with address fields
-    if let Some(chunk) = data.multi_pop_front::<14>() {
-        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] = (*chunk).unbox();
-        hash_update_16(
-            ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13],
-        );
-    }
+    state.state = state.state.update_with([a0, a1, a2, a3, a4, a5]);
 
     while let Some(chunk) = data.multi_pop_front::<16>() {
         let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15] = (*chunk)
@@ -73,10 +67,11 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Has
         );
     }
 
-    match data.multi_pop_front::<5>() {
+    match data.multi_pop_front::<3>() {
         Some(chunk) => {
-            let [d0, d1, d2, d3, d4] = (*chunk).unbox();
-            hash_update_5_finalize(ref state, [d0, d1, d2, d3, d4])
+            let [d0, d1, d2] = (*chunk).unbox();
+            let state = state.state.update_with([d0, d1, d2]);
+            state.finalize()
         },
         None => panic!("thash_140: unexpected data length"),
     }
@@ -84,11 +79,13 @@ pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> Has
 
 /// Poseidon-backed thash for multiple field elements
 pub fn thash_56(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> HashOutput {
-    let (a0, a1) = address.into_fields();
+    let [a0, a1, a2, a3, a4, a5]= address.into_field_components();
     let mut state = ctx.state_seeded;
 
     let data_len = data.len();
     assert(data_len == 14, 'thash_56: expected len = 14');
+
+    state.state = state.state.update_with([a0, a1, a2, a3, a4, a5]);
 
     while let Some(chunk) = data.multi_pop_front::<14>() {
         let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] = (*chunk).unbox();

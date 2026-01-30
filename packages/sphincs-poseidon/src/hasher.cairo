@@ -17,7 +17,6 @@ use crate::address::{Address, AddressTrait};
 use crate::word_array::{WordSpan, WordSpanTrait};
 
 /// Hash output.
-/// This encodes a [u32; 4] as a felt252 in little-endian
 pub type HashOutput = felt252;
 
 /// Hash context.

@@ -17,6 +17,7 @@ Parameters (matching params_128s.cairo):
 
 from typing import List
 from hash import poseidon_hash
+import argparse
 import json
 import sys
 
@@ -483,6 +484,28 @@ def hash_message(randomizer: int, pk_seed: int, pk_root: int, message: List[int]
     return expanded
 
 
+def derive_seeds(rng_seed: int) -> tuple:
+    """Derive sk_seed and pk_seed deterministically from rng_seed."""
+    sk_seed = poseidon_hash([rng_seed, 1])
+    pk_seed = poseidon_hash([rng_seed, 2])
+    return sk_seed, pk_seed
+
+
+def message_to_wordarray_felts(message: List[int]) -> List[int]:
+    """
+    Convert message (list of felt252) to WordArray serialization format.
+
+    WordArray Serde format for Cairo deserialization.
+    Returns: [array_len, ...elements, last_word, last_word_len]
+    """
+    result = []
+    result.append(len(message))  # Array length
+    result.extend(message)        # Message elements
+    result.append(0)              # last_word (empty)
+    result.append(0)              # last_word_len (0 bytes)
+    return result
+
+
 def split_digest(digest: int) -> tuple:
     """
     Split extended digest into mhash, tree_addr, leaf_idx.
@@ -617,52 +640,117 @@ class SphincsPoseidonSigner:
         }
 
 
-def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int, message: List[int]) -> dict:
-    """Serialize to Cairo-compatible JSON format (all field elements as hex strings)."""
-    result = {
-        "pk_seed": hex(pk_seed),
-        "pk_root": hex(pk_root),
-        "randomizer": hex(sig['randomizer']),
-        "fors_sig": [],
-        "wots_sigs": [],
-        "message": [hex(m) for m in message]
-    }
+def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int, message: List[int]) -> List[int]:
+    """
+    Serialize to flat array format for Cairo Serde deserialization.
+    Matches sphincs-btc serialization pattern.
+
+    Returns: List[int] (felt252 values to be hex-encoded for JSON)
+    """
+    result = []
+
+    # === Public key ===
+    result.append(pk_seed)     # felt252
+    result.append(pk_root)      # felt252
+
+    # === Signature ===
+    result.append(sig['randomizer'])  # felt252
 
     # FORS signature: 14 trees * (sk + 12 auth_path entries)
     for sk, auth in sig['fors_sig']:
-        result["fors_sig"].append({
-            "sk": hex(sk),
-            "auth_path": [hex(a) for a in auth]
-        })
+        result.append(sk)      # felt252
+        result.extend(auth)    # 12 felt252 values
 
     # WOTS Merkle signatures: 7 layers
     for wots_sig in sig['wots_sigs']:
-        result["wots_sigs"].append({
-            "chains": [hex(c) for c in wots_sig['chains']],
-            "auth_path": [hex(a) for a in wots_sig['auth_path']]
-        })
+        # 35 chains (SPX_WOTS_LEN = 35)
+        result.extend(wots_sig['chains'])  # 35 felt252 values
+        # 9 auth path entries (SPX_TREE_HEIGHT = 9)
+        result.extend(wots_sig['auth_path'])  # 9 felt252 values
+
+    # === Message as WordArray ===
+    result.extend(message_to_wordarray_felts(message))
 
     return result
 
 
 def main():
-    """Generate test signature."""
-    # Test values from Cairo test
-    randomizer = 0xdeadbeef
-    pk_seed = 0xcafebabe
-    sk_seed = 0xfeedface
+    """Generate SPHINCS+ Poseidon test vectors."""
+    parser = argparse.ArgumentParser(
+        description="Generate SPHINCS+ Poseidon test vectors with multi-signature support"
+    )
+    parser.add_argument(
+        '--num-signatures', '-n',
+        type=int,
+        default=1,
+        help='Number of signatures to generate (default: 1)'
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=0,
+        help='RNG seed for deterministic generation (default: 0)'
+    )
+    parser.add_argument(
+        '--message-prefix',
+        default='test',
+        help='Prefix for generated messages (default: "test")'
+    )
+    parser.add_argument(
+        '--output', '-o',
+        default=None,
+        help='Output file (default: stdout)'
+    )
+    args = parser.parse_args()
 
-    message = [0x11111111, 0x22222222, 0x33333333]
+    print("=== SPHINCS+ Poseidon Test Vector Generator ===", file=sys.stderr)
+    print(f"Parameters: h={SPX_FULL_HEIGHT}, d={SPX_D}, k={SPX_FORS_TREES}, a={SPX_FORS_HEIGHT}, w={SPX_WOTS_W}", file=sys.stderr)
+    print(f"Number of signatures: {args.num_signatures}", file=sys.stderr)
+    print(f"RNG seed: {args.seed}", file=sys.stderr)
 
-    # Test hash_message
-    digest = hash_message(randomizer, pk_seed, 0xfeedface, message)
-    print(f"Test digest: {hex(digest)}")
+    # Derive seeds deterministically
+    sk_seed, pk_seed = derive_seeds(args.seed)
+    print(f"\nSecret seed: {hex(sk_seed)}", file=sys.stderr)
+    print(f"Public seed: {hex(pk_seed)}", file=sys.stderr)
 
-    # Test split_digest
-    mhash, tree_addr, leaf_idx = split_digest(digest)
-    print(f"mhash: {hex(mhash)}")
-    print(f"tree_addr: {tree_addr}")
-    print(f"leaf_idx: {leaf_idx}")
+    # Create signer
+    signer = SphincsPoseidonSigner(sk_seed, pk_seed)
+
+    # Generate signatures
+    sigs = []
+    messages = []
+    for i in range(args.num_signatures):
+        # Convert message string to felt252
+        message_str = f"{args.message_prefix}{i}"
+        # Hash the string characters to get a felt252, use as single-element message
+        message = [poseidon_hash([ord(c) for c in message_str])]
+        messages.append(message)
+
+        print(f"\nSigning message {i+1}/{args.num_signatures}: {message_str}", file=sys.stderr)
+        sig = signer.sign(message)
+        sigs.append(sig)
+
+    # Serialize (single signature for now)
+    if args.num_signatures == 1:
+        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root, messages[0])
+    else:
+        # For now, only output first signature (can extend to multi-sig later)
+        print("\nWarning: Multi-signature format not yet implemented, outputting first signature only", file=sys.stderr)
+        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root, messages[0])
+
+    print(f"\nTotal elements: {len(result)}", file=sys.stderr)
+    print(f"Signature(s) generated successfully!", file=sys.stderr)
+
+    # Output as JSON array of hex strings
+    hex_values = [hex(v) for v in result]
+    output_data = json.dumps(hex_values)
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write(output_data)
+        print(f"Written to {args.output}", file=sys.stderr)
+    else:
+        print(output_data)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,8 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
         mhash, mut tree_address, mut leaf_idx,
     } = split_xdigest_128s(digest);
 
+    debug_print_header(tree_address, leaf_idx);
+
     let mut wots_addr: Address = Default::default();
     wots_addr.set_address_type(AddressType::WOTS);
     wots_addr.set_hypertree_addr(tree_address);
@@ -64,10 +66,14 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
     // Compute FORS public key (root) from the signature.
     let mut root = fors_pk_from_sig(ctx, fors_sig, mhash, @wots_addr);
 
+    debug_print_fors_root(root);
+
     let mut layer: u8 = 0;
     let mut wots_merkle_sig_iter = wots_merkle_sig_list.span();
 
     while let Some(WotsMerkleSignature { wots_sig, auth_path }) = wots_merkle_sig_iter.pop_front() {
+        debug_print_layer(layer, tree_address, leaf_idx, root);
+
         tree_addr.set_hypertree_layer(layer);
         tree_addr.set_hypertree_addr(tree_address);
 
@@ -94,12 +100,18 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
 
         let wots_pk = wots_pk_from_sig(ctx, *wots_sig, root_u32_array, @wots_addr);
 
+        debug_print_wots_pk(wots_pk.len());
+
         // Compute the leaf node using the WOTS public key.
         let leaf = thash(ctx, @wots_pk_addr, wots_pk.span());
+
+        debug_print_leaf(leaf);
 
         // Compute the root node of this subtree.
         // Auth path has fixed length, so we don't need to assert tree height.
         root = compute_root(ctx, @tree_addr, leaf, auth_path.span(), leaf_idx.into(), 0);
+
+        debug_print_computed_root(root);
 
         // Update the indices for the next layer.
         let (q, r) = DivRem::div_rem(tree_address, 0x200); // 1 << tree_height = 2^9 = 0x200
@@ -107,6 +119,8 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
         leaf_idx = r.try_into().unwrap();
         layer += 1;
     }
+
+    debug_print_final(root, pk_root);
 
     // Check if the root node equals the root node in the public key.
     return root == pk_root;
@@ -145,6 +159,78 @@ fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
 
     XMessageDigest { mhash, tree_address, leaf_idx }
 }
+
+// Debug helper functions - only active when debug feature is enabled
+#[cfg(feature: "debug")]
+fn felt252_to_hex(value: felt252) -> ByteArray {
+    let arr = felt252_to_u32_array(value);
+    let word_span = WordSpanTrait::new(arr.span(), 0, 0);
+    crate::word_array::hex::words_to_hex(word_span)
+}
+
+#[cfg(feature: "debug")]
+fn debug_print_header(tree_address: u64, leaf_idx: u16) {
+    println!("=== SPHINCS+ Poseidon Verification ===");
+    println!("tree_address: {}", tree_address);
+    println!("leaf_idx: {}", leaf_idx);
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_header(_tree_address: u64, _leaf_idx: u16) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_fors_root(root: felt252) {
+    println!("FORS root: {}", felt252_to_hex(root));
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_fors_root(_root: felt252) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_layer(layer: u8, tree_address: u64, leaf_idx: u16, root: felt252) {
+    println!("--- Layer {} ---", layer);
+    println!("  tree_address: {}", tree_address);
+    println!("  leaf_idx: {}", leaf_idx);
+    println!("  message (root): {}", felt252_to_hex(root));
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_layer(_layer: u8, _tree_address: u64, _leaf_idx: u16, _root: felt252) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_wots_pk(len: usize) {
+    println!("  wots_pk len: {}", len);
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_wots_pk(_len: usize) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_leaf(leaf: felt252) {
+    println!("  leaf: {}", felt252_to_hex(leaf));
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_leaf(_leaf: felt252) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_computed_root(root: felt252) {
+    println!("  computed root: {}", felt252_to_hex(root));
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_computed_root(_root: felt252) {}
+
+#[cfg(feature: "debug")]
+fn debug_print_final(root: felt252, pk_root: felt252) {
+    println!("=== Final Comparison ===");
+    println!("computed root: {}", felt252_to_hex(root));
+    println!("expected pk_root: {}", felt252_to_hex(pk_root));
+    println!("match: {}", root == pk_root);
+}
+
+#[cfg(not(feature: "debug"))]
+fn debug_print_final(_root: felt252, _pk_root: felt252) {}
 
 #[cfg(test)]
 mod tests {

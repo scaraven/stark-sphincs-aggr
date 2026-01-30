@@ -20,38 +20,13 @@ impl HashStateDefault of Default<HashState> {
 
 /// Initializes the Poseidon hasher state.
 pub fn hash_init(ref state: HashState) {
-    // no-op
+    state.state = PoseidonTrait::new();
 }
 
 /// Updates the Poseidon hasher state with a single block of felt252 values.
 #[inline]
 pub fn hash_update_16(ref state: HashState, data: [felt252; 16]) {
     state.state = state.state.update_with(data);
-}
-
-#[inline]
-pub fn hash_update_8(ref state: HashState, data: [felt252; 8]) {
-    state.state = state.state.update_with(data);
-}
-
-#[inline]
-pub fn hash_update_7(ref state: HashState, data: [felt252; 7]) {
-    state.state = state.state.update_with(data);
-}
-
-pub fn hash_update_8_finalize(ref state: HashState, data: [felt252; 8]) -> felt252 {
-    hash_update_8(ref state, data);
-    state.state.finalize()
-}
-
-pub fn hash_update_7_finalize(ref state: HashState, data: [felt252; 7]) -> felt252 {
-    hash_update_7(ref state, data);
-    state.state.finalize()
-}
-
-pub fn hash_update_16_finalize(ref state: HashState, data: [felt252; 16]) -> felt252 {
-    hash_update_16(ref state, data);
-    state.state.finalize()
 }
 
 /// Updates the Poseidon hasher state with the given data
@@ -84,16 +59,16 @@ mod tests {
         let mut state: HashState = Default::default();
 
         let data: [felt252; 7] = [1, 2, 3, 4, 5, 6, 7];
-        hash_update_7(ref state, data);
+        hash_update_block(ref state, data.span());
         state.state = state.state.update(8);
 
         let output1 = state.state.finalize();
 
         let mut state = Default::default();
         let data: [felt252; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
-        let output2 = hash_update_8_finalize(ref state, data);
+        let output2 = hash_finalize(ref state, data.span());
 
         assert_eq!(output1, output2, "Poseidon hash outputs do not match");
-        assert_eq!(output1, 142523731258509939608696022271238521916410456401611624853849835202137558864, "Poseidon hash output does not match expected value");
+        assert_eq!(output1, 1190188513163088186241995297500126947589582629387601832785015242379216793975, "Poseidon hash output does not match expected value");
     }
 }

@@ -1,14 +1,12 @@
 // SPDX-FileCopyrightText: 2025 StarkWare Industries Ltd.
 //
 // SPDX-License-Identifier: MIT
-
-use crate::hasher::felt252_to_u32_array;
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, fors_pk_from_sig};
 use crate::hasher::{
-    HashOutput, compute_root, hash_message_128s, initialize_hash_function, thash_140,
+    HashOutput, compute_root, hash_message_128s, initialize_hash_function, thash, felt252_to_u32_array
 };
-use crate::params_128s::{SPX_D, SPX_DGST_BYTES, SPX_TREE_HEIGHT};
+use crate::params_128s::{SPX_D, SPX_TREE_HEIGHT};
 use crate::word_array::{WordSpan, WordSpanTrait};
 use crate::wots::{WotsSignature, WotsSignatureDefault, WotsSignatureSerde, wots_pk_from_sig};
 
@@ -51,7 +49,7 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
     tree_addr.set_address_type(AddressType::HASHTREE);
 
     // Compute the extended message digest which is `mhash || tree_idx || leaf_idx`.
-    let digest = hash_message_128s(randomizer, pk_seed, pk_root, message, SPX_DGST_BYTES);
+    let digest = hash_message_128s(randomizer, pk_seed, pk_root, message);
 
     // Split the digest into the message hash, tree address and leaf index.
     let XMessageDigest {
@@ -97,7 +95,7 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
         let wots_pk = wots_pk_from_sig(ctx, *wots_sig, root_u32_array, @wots_addr);
 
         // Compute the leaf node using the WOTS public key.
-        let leaf = thash_140(ctx, @wots_pk_addr, wots_pk.span());
+        let leaf = thash(ctx, @wots_pk_addr, wots_pk.span());
 
         // Compute the root node of this subtree.
         // Auth path has fixed length, so we don't need to assert tree height.

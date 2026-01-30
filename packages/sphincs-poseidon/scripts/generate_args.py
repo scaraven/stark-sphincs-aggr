@@ -16,7 +16,8 @@ Parameters:
 - hash=Blake2s (STARK-optimized)
 """
 
-import hashlib
+from typing import List
+from hash import poseidon_hash
 import struct
 import json
 import sys
@@ -34,7 +35,7 @@ SPX_WOTS_LEN1 = 16
 SPX_WOTS_C_LEN = 14  # Without last 2 chains
 SPX_WOTS_C_OMIT = 2
 SPX_WOTS_TARGET_SUM = 2040
-SPX_DGST_BYTES = 22  # mhash(18) + tree_addr(3) + leaf_idx(1)
+SPX_DGST_BYTES = 30  # mhash(21) + tree_addr(7) + leaf_idx(2)
 
 class Address:
     """
@@ -104,7 +105,7 @@ class Address:
     def set_hash_addr(self, h: int):
         self.hash_addr = h & 0xFF
 
-    def to_bytes(self) -> bytes:
+    def to_ints(self) -> List[int]:
         """
         Serialize to 22 bytes matching Cairo's WordArray format.
 
@@ -141,38 +142,26 @@ class Address:
             w5_2bytes = self.tree_index & 0xFFFF
 
         # Pack as 5 u32 words (big-endian) + 2 bytes
-        result = struct.pack(">IIIII", w0, w1, w2, w3, w4)
-        result += struct.pack(">H", w5_2bytes)
-        return result
+        return [w0, w1, w2, w3, w4, w5_2bytes]
 
 
-def thash(pk_seed: bytes, address: Address, input_data: bytes) -> bytes:
+def thash(pk_seed: int, address: Address, input_data: List[int]) -> int:
     """
-    Tweakable hash matching Cairo's thash_btc.
-
-    In Cairo with Blake2s:
-    1. state_seeded = Blake2s_compress(IV, pk_seed || zeros_48)
-    2. thash = Blake2s_finalize(state_seeded, address || input)[0:16]
-
-    Equivalent to: Blake2s(pk_seed || zeros_48 || address || input)[0:16]
+    Tweakable hash matching Cairo's poseidon hash implementation
     """
     # Build the full input: pk_seed padded to 64 bytes + address + input
 
-    padded_seed = pk_seed + b'\x00' * (64 - SPX_N)
-    data = padded_seed + address.to_bytes() + input_data
-    h = blake2s_raw(data)
-    return h[:SPX_N]
+    data = [pk_seed] + address.to_ints() + input_data
+    return poseidon_hash(data)
 
 
-def compute_modified_message(pk_seed: bytes, address: Address, message: bytes, counter: int) -> bytes:
+def compute_modified_message(pk_seed: int, address: Address, message: List[int], counter: int) -> int:
     """
     Compute modified message for WOTS+C: H(message || counter).
     This is the message that must satisfy WOTS+C constraints.
     """
     # Input: message (16 bytes) || counter (4 bytes)
-    counter_bytes = struct.pack(">I", counter)
-    input_data = message + counter_bytes
-    return thash(pk_seed, address, input_data)
+    return thash(pk_seed, address, message + [counter])
 
 
 def check_wots_c_constraints(message_bytes: bytes) -> bool:
@@ -432,34 +421,35 @@ def ht_gen_auth(pk_seed: bytes, sk_seed: bytes, address: Address, leaf_idx: int)
     return auth
 
 
-def hash_message(randomizer: bytes, pk_seed: bytes, pk_root: bytes,
-                 message: bytes) -> bytes:
+def hash_message(randomizer: int, pk_seed: int, pk_root: int,
+                 message: List[int]) -> int:
     """
     Hash message to get extended digest (SPX_DGST_BYTES = 22 bytes).
     """
     # First hash: H(R || pk_seed || pk_root || message)
-    data = randomizer + pk_seed + pk_root + message
-    seed = blake2s_raw(data, print_debug=True)
+    seed = poseidon_hash([randomizer, pk_seed, pk_root] + message)
 
     # MGF1 expansion: H(R || pk_seed || seed || counter=0)
-    xof_data = randomizer + pk_seed + seed + struct.pack('>I', 0)
-    expanded = blake2s_raw(xof_data)
+    expanded = poseidon_hash([randomizer, pk_seed, seed, 0])
 
-    # Take first 22 bytes
-    return expanded[:SPX_DGST_BYTES]
+    return expanded
 
 
-def split_digest(digest: bytes) -> tuple:
+def split_digest(digest: int) -> tuple:
     """Split extended digest into mhash, tree_addr, leaf_idx."""
-    # digest is 22 bytes:
-    # - mhash: 18 bytes (for k=10, a=14: 140 bits)
-    # - tree_addr: 3 bytes (24 bits)
-    # - leaf_idx: 1 byte (8 bits)
-    mhash = digest[:18]
-    tree_addr = int.from_bytes(digest[18:21], 'big')
-    leaf_idx = digest[21]
+    # digest is 30 bytes:
+    # - mhash: 21 bytes (for k=10, a=14: 140 bits)
+    # - tree_addr: 7 bytes (54 bits)
+    # - leaf_idx: 2 byte (9 bits)
+    # - mhash | 2 discarded bits | tree_addr | 7 discarded bits | leaf_idx
 
-    return mhash, tree_addr, leaf_idx
+    leaf_idx = digest & 0x1FF  # 9 bits
+    digest >>= 16
+
+    tree_addr = digest & 0x3FFFFFFFFFFFFF  # 54 bits
+    digest >>= 56
+
+    return digest, tree_addr, leaf_idx
 
 
 # Convert bytes to list of u32 values (little-endian)
@@ -489,9 +479,7 @@ def bytes_to_u32s(data: bytes) -> list:
 class SphinxBtcSigner:
     """Complete SPHINCS+ BTC signer with WOTS+C grinding."""
 
-    def __init__(self, sk_seed: bytes, pk_seed: bytes):
-        assert len(sk_seed) == SPX_N
-        assert len(pk_seed) == SPX_N
+    def __init__(self, sk_seed: int, pk_seed: int):
         self.sk_seed = sk_seed
         self.pk_seed = pk_seed
 
@@ -507,10 +495,10 @@ class SphinxBtcSigner:
         addr.set_tree_addr(0)
         return ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
 
-    def sign(self, message: bytes) -> dict:
+    def sign(self, message: List[int]) -> dict:
         """Sign a message with full SPHINCS+ BTC signature."""
         # Generate randomizer (deterministic for reproducibility)
-        randomizer = blake2s_raw(self.sk_seed + message)[:SPX_N]
+        randomizer = poseidon_hash([self.sk_seed] + message)
 
         # Hash message to get extended digest
         digest = hash_message(randomizer, self.pk_seed, self.pk_root, message)
@@ -690,81 +678,21 @@ def serialize_multi_sig_vector(sigs: list, pk_seed: bytes, pk_root: bytes, messa
     return result
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(
-        description="Generate SPHINCS+ BTC test vectors with multi-signature support"
-    )
-    parser.add_argument(
-        '--num-signatures', '-n',
-        type=int,
-        default=1,
-        help='Number of signatures to generate (default: 1)'
-    )
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=0,
-        help='RNG seed for deterministic generation (default: 0)'
-    )
-    parser.add_argument(
-        '--message-prefix',
-        default='test',
-        help='Prefix for generated messages (default: "test")'
-    )
-    parser.add_argument(
-        '--output', '-o',
-        default=None,
-        help='Output file (default: stdout)'
-    )
-    args = parser.parse_args()
-    
-    print("=== SPHINCS+ BTC Test Vector Generator ===", file=sys.stderr)
-    print(f"Parameters: n={SPX_N}, h={SPX_FULL_HEIGHT}, d={SPX_D}, k={SPX_FORS_TREES}, a={SPX_FORS_HEIGHT}", file=sys.stderr)
-    print(f"Number of signatures: {args.num_signatures}", file=sys.stderr)
-    print(f"RNG seed: {args.seed}", file=sys.stderr)
+    """
+    let randomizer = 0xdeadbeef;
+        let pk_seed = 0xcafebabe;
+        let pk_root = 0xfeedface;
 
-    # Deterministic seeds for reproducibility
-    import hashlib
-    seed_hash = hashlib.sha256(str(args.seed).encode()).digest()
-    sk_seed = seed_hash[:SPX_N]
-    pk_seed = seed_hash[SPX_N:SPX_N*2] if len(seed_hash) >= SPX_N*2 else bytes(SPX_N)
+        let message = WordArrayTrait::new(array![0x11111111, 0x22222222, 0x33333333], 0, 0);
+        let digest = hash_message_128s(randomizer, pk_seed, pk_root, message.span());
+    """
+    randomizer = 0xdeadbeef
+    pk_seed = 0xcafebabe
+    pk_root = 0xfeedface
 
-    print(f"\nSecret seed: {sk_seed.hex()}", file=sys.stderr)
-    print(f"Public seed: {pk_seed.hex()}", file=sys.stderr)
-
-    # Create signer
-    signer = SphinxBtcSigner(sk_seed, pk_seed)
-
-    # Generate multiple signatures
-    sigs = []
-    messages = []
-    for i in range(args.num_signatures):
-        message = f"{args.message_prefix}{i}".encode()
-        messages.append(message)
-        print(f"\nSigning message {i+1}/{args.num_signatures}: {message}", file=sys.stderr)
-        sig = signer.sign(message)
-        sigs.append(sig)
-
-    # Serialize
-    if args.num_signatures == 1:
-        # Single signature: use original format for backward compatibility
-        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root, messages[0])
-    else:
-        # Multiple signatures: use new format
-        result = serialize_multi_sig_vector(sigs, pk_seed, signer.pk_root, messages)
-
-    print(f"\nTotal elements: {len(result)}", file=sys.stderr)
-    print(f"Signature(s) generated successfully!", file=sys.stderr)
-
-    # Output as JSON
-    hex_values = [hex(v) for v in result]
-    output_data = json.dumps(hex_values)
-
-    if args.output:
-        with open(args.output, 'w') as f:
-            f.write(output_data)
-    else:
-        print(output_data)
+    message = [0x11111111, 0x22222222, 0x33333333]
+    digest = hash_message(randomizer, pk_seed, pk_root, message)
+    print(digest)
 
 
 if __name__ == "__main__":

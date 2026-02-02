@@ -468,15 +468,41 @@ def ht_gen_auth(pk_seed: int, sk_seed: int, address: Address, leaf_idx: int) -> 
     return auth
 
 
-def hash_message(randomizer: int, pk_seed: int, pk_root: int, message: List[int]) -> int:
+def wordarray_to_felt252_list(message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0) -> List[int]:
+    """
+    Convert WordArray (u32 words) to felt252 list, matching Cairo's WordSpan.into_felt252().
+
+    Each full u32 word is cast directly to felt252.
+    The last partial word is shifted left to align to the MSB.
+    """
+    result = [w for w in message_u32]  # Each u32 becomes a felt252
+
+    if last_num_bytes == 1:
+        result.append(last_word * 0x1000000)
+    elif last_num_bytes == 2:
+        result.append(last_word * 0x10000)
+    elif last_num_bytes == 3:
+        result.append(last_word * 0x100)
+
+    return result
+
+
+def hash_message(randomizer: int, pk_seed: int, pk_root: int,
+                 message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0) -> int:
     """
     Hash message to get extended digest.
     Matches Cairo's hash_message_128s in hasher.cairo:68-99.
 
+    The message is a WordArray of u32 words. Cairo converts them to felt252 via
+    into_felt252() before Poseidon-hashing.
+
     Returns: felt252
     """
-    # First stage: Hash(randomizer || pk_seed || pk_root || message)
-    seed = poseidon_hash([randomizer, pk_seed, pk_root] + message)
+    # Convert u32 words to felt252 list (matching Cairo's WordSpan.into_felt252())
+    msg_felts = wordarray_to_felt252_list(message_u32, last_word, last_num_bytes)
+
+    # First stage: Hash(randomizer || pk_seed || pk_root || message_felts)
+    seed = poseidon_hash([randomizer, pk_seed, pk_root] + msg_felts)
 
     # Second stage (MGF1): Hash(randomizer || pk_seed || seed || 0)
     expanded = poseidon_hash([randomizer, pk_seed, seed, 0])
@@ -491,18 +517,21 @@ def derive_seeds(rng_seed: int) -> tuple:
     return sk_seed, pk_seed
 
 
-def message_to_wordarray_felts(message: List[int]) -> List[int]:
+def message_to_wordarray_felts(message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0) -> List[int]:
     """
-    Convert message (list of felt252) to WordArray serialization format.
+    Serialize a message (list of u32 words) to WordArray Serde format for Cairo deserialization.
 
-    WordArray Serde format for Cairo deserialization.
-    Returns: [array_len, ...elements, last_word, last_word_len]
+    WordArray { input: Array<u32>, last_input_word: u32, last_input_num_bytes: u32 }
+    Cairo Serde for Array<u32>: [length, elem0, elem1, ...]
+    Then last_input_word and last_input_num_bytes follow.
+
+    Returns: [array_len, ...u32_elements, last_word, last_num_bytes]
     """
     result = []
-    result.append(len(message))  # Array length
-    result.extend(message)        # Message elements
-    result.append(0)              # last_word (empty)
-    result.append(0)              # last_word_len (0 bytes)
+    result.append(len(message_u32))   # Array length
+    result.extend(message_u32)         # u32 word elements
+    result.append(last_word)           # last_input_word (u32)
+    result.append(last_num_bytes)      # last_input_num_bytes (u32)
     return result
 
 
@@ -573,13 +602,22 @@ class SphincsPoseidonSigner:
         addr.set_tree_addr(0)
         return ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
 
-    def sign(self, message: List[int]) -> dict:
-        """Sign a message with full SPHINCS+ signature."""
+    def sign(self, message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0) -> dict:
+        """Sign a message with full SPHINCS+ signature.
+
+        Args:
+            message_u32: Message as list of u32 words (matching WordArray.input)
+            last_word: Last partial word (matching WordArray.last_input_word)
+            last_num_bytes: Number of valid bytes in last_word (matching WordArray.last_input_num_bytes)
+        """
         # Generate randomizer (deterministic for reproducibility)
-        randomizer = poseidon_hash([self.sk_seed] + message)
+        # Use the same felt252 representation that Cairo uses for hashing
+        msg_felts = wordarray_to_felt252_list(message_u32, last_word, last_num_bytes)
+        randomizer = poseidon_hash([self.sk_seed] + msg_felts)
 
         # Hash message to get extended digest
-        digest = hash_message(randomizer, self.pk_seed, self.pk_root, message)
+        digest = hash_message(randomizer, self.pk_seed, self.pk_root,
+                              message_u32, last_word, last_num_bytes)
         mhash, tree_addr, leaf_idx = split_digest(digest)
 
         print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}", file=sys.stderr)
@@ -640,7 +678,8 @@ class SphincsPoseidonSigner:
         }
 
 
-def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int, message: List[int]) -> List[int]:
+def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int,
+                          message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0) -> List[int]:
     """
     Serialize to flat array format for Cairo Serde deserialization.
     Matches sphincs-btc serialization pattern.
@@ -668,8 +707,8 @@ def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int, message: List[i
         # 9 auth path entries (SPX_TREE_HEIGHT = 9)
         result.extend(wots_sig['auth_path'])  # 9 felt252 values
 
-    # === Message as WordArray ===
-    result.extend(message_to_wordarray_felts(message))
+    # === Message as WordArray (u32 words) ===
+    result.extend(message_to_wordarray_felts(message_u32, last_word, last_num_bytes))
 
     return result
 
@@ -720,23 +759,42 @@ def main():
     sigs = []
     messages = []
     for i in range(args.num_signatures):
-        # Convert message string to felt252
+        # Convert message string to u32 words for WordArray representation.
+        # Each character becomes a byte, packed into big-endian u32 words.
         message_str = f"{args.message_prefix}{i}"
-        # Hash the string characters to get a felt252, use as single-element message
-        message = [poseidon_hash([ord(c) for c in message_str])]
-        messages.append(message)
+        message_bytes = message_str.encode('ascii')
+
+        # Pack bytes into u32 words (big-endian, 4 bytes per word)
+        message_u32 = []
+        full_words = len(message_bytes) // 4
+        for j in range(full_words):
+            w = (message_bytes[j*4] << 24) | (message_bytes[j*4+1] << 16) | \
+                (message_bytes[j*4+2] << 8) | message_bytes[j*4+3]
+            message_u32.append(w)
+
+        # Handle remaining bytes as last_word
+        remaining = len(message_bytes) % 4
+        last_word = 0
+        for j in range(remaining):
+            last_word = (last_word << 8) | message_bytes[full_words * 4 + j]
+        last_num_bytes = remaining
+
+        messages.append((message_u32, last_word, last_num_bytes))
 
         print(f"\nSigning message {i+1}/{args.num_signatures}: {message_str}", file=sys.stderr)
-        sig = signer.sign(message)
+        sig = signer.sign(message_u32, last_word, last_num_bytes)
         sigs.append(sig)
 
     # Serialize (single signature for now)
+    msg_u32, msg_last_word, msg_last_num_bytes = messages[0]
     if args.num_signatures == 1:
-        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root, messages[0])
+        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
+                                       msg_u32, msg_last_word, msg_last_num_bytes)
     else:
         # For now, only output first signature (can extend to multi-sig later)
         print("\nWarning: Multi-signature format not yet implemented, outputting first signature only", file=sys.stderr)
-        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root, messages[0])
+        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
+                                       msg_u32, msg_last_word, msg_last_num_bytes)
 
     print(f"\nTotal elements: {len(result)}", file=sys.stderr)
     print(f"Signature(s) generated successfully!", file=sys.stderr)

@@ -23,19 +23,18 @@ pub struct Args {
 }
 
 #[executable]
-fn main() {
-    let pk = SphincsPublicKey { pk_root: 2101057191, pk_seed: 502713403 };
-
-    let sig = SphincsSignature {
-        randomizer: 123456789,
-        fors_sig: Default::default(),
-        wots_merkle_sig_list: Default::default(),
-    };
-
-    let message: WordArray = Default::default();
+fn main(args: Args) {
+    let Args { pk, sig, message } = args;
     let res = sphincs::verify_128s(message.span(), sig, pk);
     check_result(res);
 }
 
-fn check_result(res: bool) { // TODO: generate a valid signature for poseidon_hash
+#[cfg(feature: "debug")]
+fn check_result(res: bool) {
+    println!("Verification result: {}", res);
+}
+
+#[cfg(not(feature: "debug"))]
+fn check_result(res: bool) {
+    assert(res, 'Signature verification failed');
 }

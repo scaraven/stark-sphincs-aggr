@@ -29,51 +29,45 @@ pub fn hash_update_16(ref state: HashState, data: [felt252; 16]) {
     state.state = state.state.update_with(data);
 }
 
-#[inline]
-pub fn hash_update_5(ref state: HashState, data: [felt252; 5]) {
-    state.state = state.state.update_with(data);
-}
-
-#[inline]
-pub fn hash_update_4(ref state: HashState, data: [felt252; 4]) {
-    state.state = state.state.update_with(data);
-}
-
-#[inline]
-pub fn hash_update_3(ref state: HashState, data: [felt252; 3]) {
-    state.state = state.state.update_with(data);
-}
-
-pub fn hash_update_5_finalize(ref state: HashState, data: [felt252; 5]) -> felt252 {
-    hash_update_5(ref state, data);
-    state.state.finalize()
-}
-
-pub fn hash_update_4_finalize(ref state: HashState, data: [felt252; 4]) -> felt252 {
-    hash_update_4(ref state, data);
-    state.state.finalize()
-}
-
-pub fn hash_update_3_finalize(ref state: HashState, data: [felt252; 3]) -> felt252 {
-    hash_update_3(ref state, data);
-    state.state.finalize()
-}
-
-pub fn hash_update_16_finalize(ref state: HashState, data: [felt252; 16]) -> felt252 {
-    hash_update_16(ref state, data);
-    state.state.finalize()
-}
-
-/// Updates the Poseidon hasher state with the given data (data length must be a multiple of 16).
+/// Updates the Poseidon hasher state with the given data
 pub fn hash_update_block(ref state: HashState, mut data: Span<felt252>) {
     while let Some(chunk) = data.multi_pop_front::<16>() {
         hash_update_16(ref state, chunk.unbox());
+    }  
+
+    // Iterate through remaining elements
+    for word in data {
+        state.state = state.state.update(*word);
     }
-    assert(data.is_empty(), 'unaligned poseidon block');
 }
 
 /// Finalizes the Poseidon hasher state and returns the hash.
 pub fn hash_finalize(ref state: HashState, input: Span<felt252>) -> felt252 {
     hash_update_block(ref state, input);
     state.state.finalize()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test] 
+    fn test_hash_length_consistent() {
+        // This tests ensures that if we hash 4 felt252 values and then update with 1 more, we 
+        // get the same result as hashing all 5 at once.
+        let mut state: HashState = Default::default();
+
+        let data: [felt252; 7] = [1, 2, 3, 4, 5, 6, 7];
+        hash_update_block(ref state, data.span());
+        state.state = state.state.update(8);
+
+        let output1 = state.state.finalize();
+
+        let mut state = Default::default();
+        let data: [felt252; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+        let output2 = hash_finalize(ref state, data.span());
+
+        assert_eq!(output1, output2, "Poseidon hash outputs do not match");
+        assert_eq!(output1, 142523731258509939608696022271238521916410456401611624853849835202137558864, "Poseidon hash output does not match expected value");
+    }
 }

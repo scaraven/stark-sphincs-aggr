@@ -3,23 +3,20 @@
 // SPDX-License-Identifier: MIT
 
 // Available hash functions.
-mod blake;
 mod poseidon;
+use core::hash::HashStateExTrait;
 use core::hash::HashStateTrait;
 
 // Poseidon backend (arithmetic-friendly).
-pub use poseidon::hash_update_16_finalize;
 use poseidon::{
-    HashState, hash_init, hash_update_16, hash_update_3_finalize, hash_update_4_finalize,
-    hash_update_5_finalize,
+    HashState, hash_init, hash_finalize,
 };
 
 // Imports.
 use crate::address::{Address, AddressTrait};
-use crate::word_array::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
+use crate::word_array::{WordSpan, WordSpanTrait};
 
 /// Hash output.
-/// This encodes a [u32; 4] as a felt252 in little-endian
 pub type HashOutput = felt252;
 
 /// Hash context.
@@ -37,125 +34,67 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
     SpxCtx { state_seeded: state }
 }
 
-/// Poseidon-backed thash for 1 input field element.
-pub fn thash_single(ctx: SpxCtx, address: @Address, data: felt252) -> HashOutput {
-    let (a0, a1) = address.into_fields();
+/// Poseidon-backed thash.
+pub fn thash(ctx: SpxCtx, address: @Address, data: Span<felt252>) -> HashOutput {
+    let [a0, a1, a2, a3, a4, a5] = address.into_field_components();
     let mut state = ctx.state_seeded;
-    hash_update_3_finalize(ref state, [a0, a1, data])
+    state.state = state.state.update_with([a0, a1, a2, a3, a4, a5]);
+    hash_finalize(ref state, data)
 }
 
-/// Poseidon-backed thash for 2 input words
-pub fn thash_8(ctx: SpxCtx, address: @Address, word0: felt252, word1: felt252) -> HashOutput {
-    let (a0, a1) = address.into_fields();
-    let mut state = ctx.state_seeded;
-    hash_update_4_finalize(ref state, [a0, a1, word0, word1])
-}
+/// Convert a felt252 to an array of 8 u32s (big-endian).
+/// Note the msb u32 will have some leading zeros as felt252 is only 252 bits.
+pub fn felt252_to_u32_array(value: felt252) -> [u32; 8] {
+    let mut value_u256: u256 = value.into();
 
-/// Poseidon-backed thash for FORS public key hashing.
-pub fn thash_140(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> HashOutput {
-    let mut state = ctx.state_seeded;
-    let (a0, a1) = address.into_fields();
+    // Take 32 bits at a time
+    let (rem, a) = DivRem::div_rem(value_u256, 0x100000000);
+    let (rem, b) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, c) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, d) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, e) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, f) = DivRem::div_rem(rem, 0x100000000);
+    let (rem, g) = DivRem::div_rem(rem, 0x100000000);
+    let (o, h) = DivRem::div_rem(rem, 0x100000000);
 
-    assert(data.len() == 35, 'thash_140: expected len = 35');
+    assert(o == 0, 'felt252_to_u32_array: overflow');
 
-    // Do initial update with address fields
-    if let Some(chunk) = data.multi_pop_front::<14>() {
-        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] = (*chunk).unbox();
-        hash_update_16(
-            ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13],
-        );
-    }
-
-    while let Some(chunk) = data.multi_pop_front::<16>() {
-        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15] = (*chunk)
-            .unbox();
-        hash_update_16(
-            ref state, [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15],
-        );
-    }
-
-    match data.multi_pop_front::<5>() {
-        Some(chunk) => {
-            let [d0, d1, d2, d3, d4] = (*chunk).unbox();
-            hash_update_5_finalize(ref state, [d0, d1, d2, d3, d4])
-        },
-        None => panic!("thash_140: unexpected data length"),
-    }
-}
-
-/// Poseidon-backed thash for multiple field elements
-pub fn thash_56(ctx: SpxCtx, address: @Address, mut data: Span<felt252>) -> HashOutput {
-    let (a0, a1) = address.into_fields();
-    let mut state = ctx.state_seeded;
-
-    let data_len = data.len();
-    assert(data_len == 14, 'thash_56: expected len = 14');
-
-    while let Some(chunk) = data.multi_pop_front::<14>() {
-        let [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13] = (*chunk).unbox();
-        return hash_update_16_finalize(
-            ref state, [a0, a1, d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13],
-        );
-    }
-
-    panic!("thash_56: unexpected data length");
-}
-
-/// Convert a felt252 to an array of 4 u32s (little-endian).
-fn felt252_to_u32_array(value: felt252) -> Array<u32> {
-    let value_u256: u256 = value.into();
-    let mut result: Array<u32> = array![];
-
-    result.append((value_u256 & 0xFFFFFFFF).try_into().unwrap());
-    result.append(((value_u256 / 0x100000000) & 0xFFFFFFFF).try_into().unwrap());
-    result.append(((value_u256 / 0x10000000000000000) & 0xFFFFFFFF).try_into().unwrap());
-    result.append(((value_u256 / 0x1000000000000000000000000) & 0xFFFFFFFF).try_into().unwrap());
-
-    result
+    [h.try_into().unwrap(), g.try_into().unwrap(), f.try_into().unwrap(), e.try_into().unwrap(), 
+    d.try_into().unwrap(), c.try_into().unwrap(), b.try_into().unwrap(), a.try_into().unwrap()]
 }
 
 /// Hash a message using selected hash function.
-/// Returns the extended message digest of size SPX_DGST_BYTES as a [WordArray].
-/// NOTE: this is not a generic implementation, rather a shortcut for 128s.
-/// As Poseidon only returns field elements, we use blake hashing here instead.
 pub fn hash_message_128s(
     randomizer: HashOutput,
     pk_seed: HashOutput,
     pk_root: HashOutput,
     message: WordSpan,
-    output_len: u32,
-) -> WordArray {
-    let mut data: Array<u32> = array![];
-    data.append_span(felt252_to_u32_array(randomizer).span());
-    data.append_span(felt252_to_u32_array(pk_seed).span());
-    data.append_span(felt252_to_u32_array(pk_root).span());
+) -> felt252 {
+    let mut data: Array<felt252> = array![];
+    data.append(randomizer);
+    data.append(pk_seed);
+    data.append(pk_root);
 
-    let (msg_words, msg_last_word, msg_last_word_len) = message.into_components();
-    data.append_span(msg_words);
+    let msg_words = message.into_felt252();
+    data.append_span(msg_words.span());
 
-    let mut state: blake::HashState = Default::default();
-    blake::hash_init(ref state);
+    let mut state: HashState = Default::default();
+    poseidon::hash_init(ref state);
 
     // Compute the seed for XOF.
-    let seed = blake::hash_finalize(state, data, msg_last_word, msg_last_word_len);
+    let seed = poseidon::hash_finalize(ref state, data.span());
 
-    let mut xof_data: Array<u32> = array![];
-    xof_data.append_span(felt252_to_u32_array(randomizer).span());
-    xof_data.append_span(felt252_to_u32_array(pk_seed).span());
-    xof_data.append_span(seed.span());
+    let mut xof_data: Array<felt252> = array![];
+    xof_data.append(randomizer);
+    xof_data.append(pk_seed);
+    xof_data.append(seed);
     xof_data.append(0); // MGF1 counter = 0
 
     // Apply MGF1 to the seed.
-    let mut buffer = blake::hash_finalize(state, xof_data, 0, 0).span();
+    poseidon::hash_init(ref state);
+    let buffer = poseidon::hash_finalize(ref state, xof_data.span());
 
-    // Construct the digest from the extended output.
-    // NOTE: we haven't cleared the LSB of the last word, has to be handled correctly.
-    let last_word = *buffer.pop_back().unwrap();
-
-    // Construct the digest from the first 7 words (28 bits) and add 2 bytes from the last word.
-    let res = WordArrayTrait::new(buffer.into(), last_word / 0x10000, 2);
-    assert(res.byte_len() == output_len, 'Invalid extended digest length');
-    res
+    buffer
 }
 
 /// Compute the root of a tree given the leaf and the authentication path.
@@ -187,7 +126,7 @@ pub fn compute_root(
         address.set_tree_height(i);
         address.set_tree_index(leaf_idx + idx_offset);
 
-        node = thash_8(ctx, @address, word0, word1);
+        node = thash(ctx, @address, [word0, word1].span());
     }
 
     node
@@ -209,4 +148,71 @@ pub impl HashOutputSerde of Serde<HashOutput> {
 pub fn to_hex(data: Span<u32>) -> ByteArray {
     let word_span = WordSpanTrait::new(data, 0, 0);
     crate::word_array::hex::words_to_hex(word_span)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use super::initialize_hash_function;
+    use crate::address::AddressType;
+    use crate::WordArrayTrait;
+
+#[test]
+    fn test_felt252_to_u32_array() {
+        let value: felt252 = 0x0123456890abcdef0123456890abcdef0123456890abcdef0123456890abcde;
+        let arr = felt252_to_u32_array(value);
+        assert_eq!(arr, 
+            [0x0123456, 0x890abcde, 0xf0123456, 0x890abcde,
+             0xf0123456, 0x890abcde, 0xf0123456, 0x890abcde]);
+    }
+
+    #[test]
+    fn test_hash_message_128() {
+        let randomizer = 0xdeadbeef;
+        let pk_seed = 0xcafebabe;
+        let pk_root = 0xfeedface;
+
+        let message = WordArrayTrait::new(array![0x11111111, 0x22222222, 0x33333333], 0, 0);
+        let digest = hash_message_128s(randomizer, pk_seed, pk_root, message.span());
+
+        assert_eq!(digest, 2182198415344895388480530065214389512836123652580788368776596040288394447218);
+    }
+
+    #[test]
+    fn test_initialize_hash_function() {
+        let pk_seed = 0x1234;
+        let ctx = initialize_hash_function(pk_seed);
+        let mut state = ctx.state_seeded;
+
+        state.state = state.state.update(0);
+        let output_1 = state.state.finalize();
+
+        let mut state = Default::default();
+        hash_init(ref state);
+
+        state.state = state.state.update(pk_seed);
+        state.state = state.state.update(0);
+        let output_2 = state.state.finalize();
+
+        assert_eq!(output_1, output_2, "Initialized hash states do not match");
+        assert_eq!(output_1, 379277542665157213325042857308534457199001041868780771123009522510742340366, "Poseidon hash output does not match expected value");
+    }
+
+    #[test]
+    fn test_hash_finalize() {
+        let pk_seed = 0xdeadbeef;
+        let mut address: Address = Default::default();
+        address.set_hypertree_layer(0x01);
+        address.set_address_type(AddressType::HASHTREE);
+        address.set_keypair(0x3456);
+
+        let ctx = initialize_hash_function(pk_seed);
+        
+
+        let data: [felt252; 4] = [0x11111111, 0x22222222, 0x33333333, 0x44444444];
+        let output = thash(ctx, @address, data.span());
+
+        assert_eq!(output, 1190188513163088186241995297500126947589582629387601832785015242379216793975, "Poseidon hash output does not match expected value");
+    }
 }

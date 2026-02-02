@@ -17,7 +17,6 @@ Parameters:
 """
 
 import hashlib
-import os
 import struct
 import json
 import sys

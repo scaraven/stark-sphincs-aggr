@@ -2,8 +2,8 @@
     "single_page": true,
     "tasks": [{
         "type": "Cairo1Executable",
-        "path": "target/release/sphincs_plus.executable.json",
+        "path": "target/release/sphincs_poseidon.executable.json",
         "program_hash_function": "blake",
-        "user_args_file": "packages/sphincs-plus/tests/data/sha2_simple_128s.json"
+        "user_args_file": "benchmarks/results/temp_args/poseidon_sig.json"
     }]
 }

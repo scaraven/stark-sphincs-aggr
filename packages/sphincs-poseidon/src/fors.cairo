@@ -7,7 +7,7 @@
 //! overview and https://www.di-mgt.com.au/pqc-09-fors-sig.html for a step-by-step construction.
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait, AddressType};
-use crate::hasher::{HashOutput, SpxCtx, compute_root, thash};
+use crate::hasher::{HashOutput, SpxCtx, compute_root, thash_fors_tree_root, thash_single};
 use crate::params_128s::{SPX_FORS_BASE_OFFSET, SPX_FORS_HEIGHT, SPX_FORS_TREES};
 use crate::word_array::{WordSpan, WordSpanTrait};
 
@@ -45,7 +45,7 @@ pub fn fors_pk_from_sig(
         fors_tree_addr.set_tree_index(idx_offset + leaf_idx);
 
         // Derive the leaf hash from the secret key seed and tree address.
-        let leaf = thash(ctx, @fors_tree_addr, [sk_seed].span());
+        let leaf = thash_single(ctx, @fors_tree_addr, sk_seed);
 
         // Derive the corresponding root node of this tree.
         // Auth path has fixed length, so we don't need to assert tree height.
@@ -59,7 +59,12 @@ pub fn fors_pk_from_sig(
     let mut fors_pk_addr = address.clone();
     fors_pk_addr.set_address_type(AddressType::FORSPK);
 
-    thash(ctx, @fors_pk_addr, roots.span())
+    let mut roots_sp = roots.span();
+    if let Some(chunk) = roots_sp.multi_pop_front::<SPX_FORS_TREES>() {
+        return thash_fors_tree_root(ctx, @fors_pk_addr, chunk.unbox());
+    }
+
+    panic!("invalid number of FORS trees");
 }
 
 /// Convert FORS mhash to leaves indices.

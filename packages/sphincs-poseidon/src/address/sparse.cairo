@@ -100,14 +100,9 @@ pub impl AddressImpl of AddressTrait {
 
     fn into_field_components(self: Address) -> [felt252; 8] {
         [
-            self.layer.into(),
-            self.hypertree_addr_hi.into(),
-            self.hypertree_addr_lo.into(),
-            self.address_type.into(),
-            self.keypair.into(),
-            self.tree_height.into(),
-            self.tree_index.into(),
-            self.wots_addr.into(),
+            self.layer.into(), self.hypertree_addr_hi.into(), self.hypertree_addr_lo.into(),
+            self.address_type.into(), self.keypair.into(), self.tree_height.into(),
+            self.tree_index.into(), self.wots_addr.into(),
         ]
     }
 }

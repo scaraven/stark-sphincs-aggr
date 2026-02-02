@@ -9,7 +9,7 @@
 
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait};
-use crate::hasher::{HashOutput, HashOutputSerde, SpxCtx, thash};
+use crate::hasher::{HashOutput, HashOutputSerde, SpxCtx, thash_single};
 use crate::params_128s::SPX_WOTS_LEN;
 
 /// WOTS+ signature: array of partially hashed private keys.
@@ -96,11 +96,11 @@ pub fn chain_hash_128s(
     let mut wots_addr = address.clone();
     wots_addr.set_wots_addr(chain_idx + length);
 
-    let mut output = thash(ctx, @wots_addr, [input].span());
+    let mut output = thash_single(ctx, @wots_addr, input);
 
     for i in length + 1..15 { // SPX_WOTS_W - 1
         wots_addr.set_wots_addr(chain_idx + i);
-        output = thash(ctx, @wots_addr, [output].span());
+        output = thash_single(ctx, @wots_addr, output);
     }
     output
 }

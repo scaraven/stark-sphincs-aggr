@@ -129,11 +129,7 @@ pub impl AddressImpl of AddressTrait {
 
     fn into_field_components(self: Address) -> [felt252; 6] {
         [
-            self.w0.into(),
-            self.w1.into(),
-            self.w2.into(),
-            self.w3.into(),
-            self.w4.into(),
+            self.w0.into(), self.w1.into(), self.w2.into(), self.w3.into(), self.w4.into(),
             self.w5.into(),
         ]
     }

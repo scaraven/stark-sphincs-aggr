@@ -4,16 +4,15 @@
 
 // Available hash functions.
 mod poseidon;
-use core::hash::HashStateExTrait;
-use core::hash::HashStateTrait;
+use core::hash::{HashStateExTrait, HashStateTrait};
 
 // Poseidon backend (arithmetic-friendly).
-use poseidon::{
-    HashState, hash_init, hash_finalize,
-};
+use poseidon::{HashState, hash_finalize, hash_init};
+use poseidon::{hash_finalize_1, hash_finalize_2, hash_finalize_fors_tree_root};
 
 // Imports.
 use crate::address::{Address, AddressTrait};
+use crate::params_128s;
 use crate::word_array::{WordSpan, WordSpanTrait};
 
 /// Hash output.
@@ -34,12 +33,35 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
     SpxCtx { state_seeded: state }
 }
 
-/// Poseidon-backed thash.
-pub fn thash(ctx: SpxCtx, address: @Address, data: Span<felt252>) -> HashOutput {
+#[inline]
+fn seed_address(ctx: SpxCtx, address: @Address) -> HashState {
     let [a0, a1, a2, a3, a4, a5] = address.into_field_components();
     let mut state = ctx.state_seeded;
     state.state = state.state.update_with([a0, a1, a2, a3, a4, a5]);
+    state
+}
+
+/// Poseidon-backed thash.
+pub fn thash(ctx: SpxCtx, address: @Address, data: Span<felt252>) -> HashOutput {
+    let mut state = seed_address(ctx, address);
     hash_finalize(ref state, data)
+}
+
+pub fn thash_fors_tree_root(
+    ctx: SpxCtx, address: @Address, data: [felt252; params_128s::SPX_FORS_TREES],
+) -> HashOutput {
+    let mut state = seed_address(ctx, address);
+    hash_finalize_fors_tree_root(ref state, data)
+}
+
+pub fn thash_single(ctx: SpxCtx, address: @Address, data: HashOutput) -> HashOutput {
+    let mut state = seed_address(ctx, address);
+    hash_finalize_1(ref state, data)
+}
+
+pub fn thash_2(ctx: SpxCtx, address: @Address, data0: HashOutput, data1: HashOutput) -> HashOutput {
+    let mut state = seed_address(ctx, address);
+    hash_finalize_2(ref state, data0, data1)
 }
 
 /// Convert a felt252 to an array of 8 u32s (big-endian).
@@ -59,16 +81,15 @@ pub fn felt252_to_u32_array(value: felt252) -> [u32; 8] {
 
     assert(o == 0, 'felt252_to_u32_array: overflow');
 
-    [h.try_into().unwrap(), g.try_into().unwrap(), f.try_into().unwrap(), e.try_into().unwrap(), 
-    d.try_into().unwrap(), c.try_into().unwrap(), b.try_into().unwrap(), a.try_into().unwrap()]
+    [
+        h.try_into().unwrap(), g.try_into().unwrap(), f.try_into().unwrap(), e.try_into().unwrap(),
+        d.try_into().unwrap(), c.try_into().unwrap(), b.try_into().unwrap(), a.try_into().unwrap(),
+    ]
 }
 
 /// Hash a message using selected hash function.
 pub fn hash_message_128s(
-    randomizer: HashOutput,
-    pk_seed: HashOutput,
-    pk_root: HashOutput,
-    message: WordSpan,
+    randomizer: HashOutput, pk_seed: HashOutput, pk_root: HashOutput, message: WordSpan,
 ) -> felt252 {
     let mut data: Array<felt252> = array![];
     data.append(randomizer);
@@ -126,7 +147,7 @@ pub fn compute_root(
         address.set_tree_height(i);
         address.set_tree_index(leaf_idx + idx_offset);
 
-        node = thash(ctx, @address, [word0, word1].span());
+        node = thash_2(ctx, @address, word0, word1);
     }
 
     node
@@ -152,19 +173,21 @@ pub fn to_hex(data: Span<u32>) -> ByteArray {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use super::initialize_hash_function;
-    use crate::address::AddressType;
     use crate::WordArrayTrait;
+    use crate::address::AddressType;
+    use super::{*, initialize_hash_function};
 
-#[test]
+    #[test]
     fn test_felt252_to_u32_array() {
         let value: felt252 = 0x0123456890abcdef0123456890abcdef0123456890abcdef0123456890abcde;
         let arr = felt252_to_u32_array(value);
-        assert_eq!(arr, 
-            [0x0123456, 0x890abcde, 0xf0123456, 0x890abcde,
-             0xf0123456, 0x890abcde, 0xf0123456, 0x890abcde]);
+        assert_eq!(
+            arr,
+            [
+                0x0123456, 0x890abcde, 0xf0123456, 0x890abcde, 0xf0123456, 0x890abcde, 0xf0123456,
+                0x890abcde,
+            ],
+        );
     }
 
     #[test]
@@ -176,7 +199,9 @@ mod tests {
         let message = WordArrayTrait::new(array![0x11111111, 0x22222222, 0x33333333], 0, 0);
         let digest = hash_message_128s(randomizer, pk_seed, pk_root, message.span());
 
-        assert_eq!(digest, 2182198415344895388480530065214389512836123652580788368776596040288394447218);
+        assert_eq!(
+            digest, 2182198415344895388480530065214389512836123652580788368776596040288394447218,
+        );
     }
 
     #[test]
@@ -196,7 +221,11 @@ mod tests {
         let output_2 = state.state.finalize();
 
         assert_eq!(output_1, output_2, "Initialized hash states do not match");
-        assert_eq!(output_1, 379277542665157213325042857308534457199001041868780771123009522510742340366, "Poseidon hash output does not match expected value");
+        assert_eq!(
+            output_1,
+            379277542665157213325042857308534457199001041868780771123009522510742340366,
+            "Poseidon hash output does not match expected value",
+        );
     }
 
     #[test]
@@ -208,11 +237,14 @@ mod tests {
         address.set_keypair(0x3456);
 
         let ctx = initialize_hash_function(pk_seed);
-        
 
         let data: [felt252; 4] = [0x11111111, 0x22222222, 0x33333333, 0x44444444];
         let output = thash(ctx, @address, data.span());
 
-        assert_eq!(output, 1190188513163088186241995297500126947589582629387601832785015242379216793975, "Poseidon hash output does not match expected value");
+        assert_eq!(
+            output,
+            1190188513163088186241995297500126947589582629387601832785015242379216793975,
+            "Poseidon hash output does not match expected value",
+        );
     }
 }

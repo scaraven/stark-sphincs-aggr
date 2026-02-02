@@ -4,7 +4,8 @@
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, fors_pk_from_sig};
 use crate::hasher::{
-    HashOutput, compute_root, hash_message_128s, initialize_hash_function, thash, felt252_to_u32_array
+    HashOutput, compute_root, felt252_to_u32_array, hash_message_128s, initialize_hash_function,
+    thash,
 };
 use crate::params_128s::{SPX_D, SPX_TREE_HEIGHT};
 use crate::word_array::{WordSpan, WordSpanTrait};
@@ -52,9 +53,7 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
     let digest = hash_message_128s(randomizer, pk_seed, pk_root, message);
 
     // Split the digest into the message hash, tree address and leaf index.
-    let XMessageDigest {
-        mhash, mut tree_address, mut leaf_idx,
-    } = split_xdigest_128s(digest);
+    let XMessageDigest { mhash, mut tree_address, mut leaf_idx } = split_xdigest_128s(digest);
 
     debug_print_header(tree_address, leaf_idx);
 
@@ -138,8 +137,10 @@ fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
 
     // Take the next 54 bits as tree address from h, g
     // h[16:32] + g[0:32] + f[0:6] = 54 bits
-    let (_f_div , f_mod) = DivRem::div_rem(f, 0x40); // 6 bits
-    let tree_address: u64 = (h_rem.into() / 0x80 + g.into() * 0x10000 + f_mod.into() *  0x1000000000000);
+    let (_f_div, f_mod) = DivRem::div_rem(f, 0x40); // 6 bits
+    let tree_address: u64 = (h_rem.into() / 0x80
+        + g.into() * 0x10000
+        + f_mod.into() * 0x1000000000000);
 
     // f[8:32] + e + d + c + b + a[0:16] = message hash
     // next 21 bytes
@@ -149,11 +150,10 @@ fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
     let (d_rem, d_mod) = DivRem::div_rem(d, 0x10000);
     let (e_rem, e_mod) = DivRem::div_rem(e, 0x10000);
     let (f_rem, f_mod) = DivRem::div_rem(f, 0x10000);
-    let arr: Array<u32> = array![a_mod * 0x10000 + b_rem, 
-                                b_mod * 0x10000 + c_rem,
-                                c_mod * 0x10000 + d_rem,
-                                d_mod * 0x10000 + e_rem, 
-                                e_mod * 0x10000 + f_rem];
+    let arr: Array<u32> = array![
+        a_mod * 0x10000 + b_rem, b_mod * 0x10000 + c_rem, c_mod * 0x10000 + d_rem,
+        d_mod * 0x10000 + e_rem, e_mod * 0x10000 + f_rem,
+    ];
 
     let mhash = WordSpanTrait::new(arr.span(), f_mod / 0x100, 1);
 

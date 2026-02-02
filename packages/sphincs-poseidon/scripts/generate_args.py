@@ -193,12 +193,13 @@ def compute_checksum(msg_base_w: List[int]) -> List[int]:
         csum += (SPX_WOTS_W - 1) - digit
 
     # Convert checksum to base-w (SPX_WOTS_LEN2 = 3 digits for W=16)
-    csum_base_w = []
-    for _ in range(SPX_WOTS_LEN2):
-        csum_base_w.append(csum & 0xF)
-        csum >>= 4
+    # Must match Cairo's big-endian nibble order: [e, f, g] for csum = 0xefg
+    e = csum // 0x100
+    fg = csum % 0x100
+    f = fg // 0x10
+    g = fg % 0x10
 
-    return csum_base_w
+    return [e, f, g]
 
 
 def chain_hash(pk_seed: int, address: Address, input_val: int, start: int, steps: int) -> int:

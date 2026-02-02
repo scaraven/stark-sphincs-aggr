@@ -355,53 +355,83 @@ def fors_pk(pk_seed: int, sk_seed: int, address: Address) -> int:
     return thash(pk_seed, addr, roots)
 
 
-def felt252_to_wordspan_bytes(value: int, num_bytes: int) -> List[int]:
+def mhash_felt_to_wordspan(mhash_felt: int) -> List[tuple]:
     """
-    Convert felt252 to list of bytes (as ints 0-255) for message_to_indices.
-    Little-endian byte order.
+    Convert mhash felt252 to WordSpan representation: list of (word, num_bytes) pairs.
+    Matches Cairo's split_xdigest_128s output format.
+
+    The mhash is 21 bytes = 5 full u32 words (big-endian) + 1 trailing byte.
     """
-    bytes_list = []
-    for _ in range(num_bytes):
-        bytes_list.append(value & 0xFF)
-        value >>= 8
-    return bytes_list
+    # Convert felt252 to 21 big-endian bytes
+    mhash_bytes = mhash_felt.to_bytes(SPX_FORS_MSG_BYTES, byteorder='big')
+
+    words = []
+    full_words = len(mhash_bytes) // 4  # 5
+    for i in range(full_words):
+        w = (mhash_bytes[i*4] << 24) | (mhash_bytes[i*4+1] << 16) | \
+            (mhash_bytes[i*4+2] << 8) | mhash_bytes[i*4+3]
+        words.append((w, 4))
+
+    remaining = len(mhash_bytes) % 4  # 1
+    if remaining > 0:
+        last_word = 0
+        for j in range(remaining):
+            last_word = (last_word << 8) | mhash_bytes[full_words * 4 + j]
+        words.append((last_word, remaining))
+
+    return words
 
 
 def message_to_indices(mhash_felt: int) -> List[int]:
     """
     Convert FORS message hash (felt252) to leaf indices (12 bits each, k=14 indices).
-    Must match Cairo's message_to_indices_128s.
+    Must match Cairo's message_to_indices_128s exactly.
 
-    Cairo processes WordSpan in little-endian byte order.
+    Cairo processes WordSpan words in order, but reverses bytes within each u32 word
+    to get little-endian byte order, then extracts 12-bit indices from that stream.
     """
-    # Convert felt252 to bytes (little-endian)
-    mhash_bytes = felt252_to_wordspan_bytes(mhash_felt, SPX_FORS_MSG_BYTES)
+    wordspan = mhash_felt_to_wordspan(mhash_felt)
 
     indices = []
     acc = 0
     acc_bits = 0
-    byte_idx = 0
 
-    while len(indices) < SPX_FORS_TREES and byte_idx < len(mhash_bytes):
-        # Read next byte (little-endian)
-        byte_val = mhash_bytes[byte_idx]
-        byte_idx += 1
+    for word, num_bytes in wordspan:
+        if num_bytes == 4:
+            # Decompose BE word [ab cd ef gh] into bytes
+            ab = (word >> 24) & 0xFF
+            cd = (word >> 16) & 0xFF
+            ef = (word >> 8) & 0xFF
+            gh = word & 0xFF
 
-        # Accumulate: shift left by 8 and add new byte
-        acc = (acc << 8) | byte_val
-        acc_bits += 8
-
-        # Extract 12-bit indices while we have enough bits
-        while acc_bits >= 12 and len(indices) < SPX_FORS_TREES:
-            shift_amount = acc_bits - 12
-            idx = (acc >> shift_amount) & 0xFFF  # 12-bit mask
-            indices.append(idx)
-            acc = acc & ((1 << shift_amount) - 1)  # Keep remaining bits
-            acc_bits -= 12
-
-    # Pad with zeros if we don't have enough indices
-    while len(indices) < SPX_FORS_TREES:
-        indices.append(0)
+            if acc_bits == 0:
+                c = cd >> 4
+                d = cd & 0xF
+                indices.append(d * 0x100 + ab)
+                indices.append(ef * 0x10 + c)
+                acc = gh
+                acc_bits = 8
+            elif acc_bits == 8:
+                a = ab >> 4
+                b = ab & 0xF
+                g = gh >> 4
+                h = gh & 0xF
+                indices.append(b * 0x100 + acc)
+                indices.append(cd * 0x10 + a)
+                indices.append(h * 0x100 + ef)
+                acc = g
+                acc_bits = 4
+            elif acc_bits == 4:
+                e = ef >> 4
+                f = ef & 0xF
+                indices.append(ab * 0x10 + acc)
+                indices.append(f * 0x100 + cd)
+                indices.append(gh * 0x10 + e)
+                acc = 0
+                acc_bits = 0
+        elif num_bytes == 1:
+            assert acc_bits == 4, f'invalid acc_bits ({acc_bits}) for last byte'
+            indices.append(word * 0x10 + acc)
 
     return indices
 

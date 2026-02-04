@@ -1,0 +1,31 @@
+{
+  "benchmarks": {
+    "timestamp": "2026-02-04T13:19:24.524503",
+    "num_signatures": 2,
+    "seed": 0,
+    "message_prefix": "test",
+    "generation": {
+      "success": true,
+      "generation_time": 254.1913502216339,
+      "args_file": "/home/scaraven/Documents/stark-sphincs-aggr/benchmarks/results/temp_args/multisig_n2_seed0.json",
+      "num_signatures": 2,
+      "seed": 0,
+      "stderr": "=== SPHINCS+ Poseidon Test Vector Generator ===\nParameters: h=63, d=7, k=14, a=12, w=16\nNumber of signatures: 2\nRNG seed: 0\n\nSecret seed: 0x635678f47954cc45c28bd10e1eccec9b2fa43a4e53a6c110ed74cb8e1285517\nPublic seed: 0x6b81305b1b41e20104694a00733ac26096dad242a476acd5e0c336d1a1b611d\nComputing public key root (this may take a while)...\nPublic key root: 0x1dc40f97fcd8cb16ece3fc5be8313829670e3ff91459d64f1cac91f794c28cf\n\nSigning message 1/2: test0\nMessage digest: tree_addr=17842706631938504, leaf_idx=411\nGenerating FORS signature...\nFORS root: 0xd3bc398b592591b4bf0cfce2c8d21fb7ee8c4f7afffa69e0abf1d5916fb29b\nLayer 0: tree_addr=17842706631938504, leaf_idx=411\nLayer 1: tree_addr=34849036390504, leaf_idx=456\nLayer 2: tree_addr=68064524200, leaf_idx=104\nLayer 3: tree_addr=132938523, leaf_idx=424\nLayer 4: tree_addr=259645, leaf_idx=283\nLayer 5: tree_addr=507, leaf_idx=61\nLayer 6: tree_addr=0, leaf_idx=507\n\nSigning message 2/2: test1\nMessage digest: tree_addr=14768815047872944, leaf_idx=458\nGenerating FORS signature...\nFORS root: 0x6c9b287910984dcf0a0ba30d8eb4ca8a696e632d0303dc904bfea81f3ed528b\nLayer 0: tree_addr=14768815047872944, leaf_idx=458\nLayer 1: tree_addr=28845341890376, leaf_idx=432\nLayer 2: tree_addr=56338558379, leaf_idx=328\nLayer 3: tree_addr=110036246, leaf_idx=427\nLayer 4: tree_addr=214914, leaf_idx=278\nLayer 5: tree_addr=419, leaf_idx=386\nLayer 6: tree_addr=0, leaf_idx=419\n\nTotal elements: 993\nSignature(s) generated successfully!\n"
+    },
+    "build": {
+      "success": true,
+      "build_time": 2.8625431060791016,
+      "stdout": "   Compiling lib(sphincs_poseidon) sphincs_poseidon v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-poseidon/Scarb.toml)\n   Compiling executable(poseidon_multi) sphincs_poseidon v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-poseidon/Scarb.toml)\n   Compiling executable(poseidon_main) sphincs_poseidon v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-poseidon/Scarb.toml)\n    Finished `release` profile target(s) in 3 seconds\n",
+      "stderr": ""
+    },
+    "execution": {
+      "success": true,
+      "execution_time": 0.6108131408691406,
+      "resource_usage": {},
+      "stdout": "   Executing sphincs_poseidon\nResources:\n\tsteps: 620,475\n\tmax memory address: 827,075\n\tmemory holes: 32,541\n\tbuiltins:\n\t\trange_check_builtin: 46,089\n\t\tposeidon_builtin: 20,267\n\tmemory segments:\n\t\texecution: 525,670\n\t\tposeidon: 121,602\n\t\trange_check: 46,089\nSaving output to: target/execute/sphincs_poseidon/execution2\n",
+      "stderr": ""
+    },
+    "total_time": 257.66470646858215,
+    "per_signature_time": 0.3054065704345703
+  }
+}

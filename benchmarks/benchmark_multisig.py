@@ -20,10 +20,17 @@ import sys
 
 
 class MultiSigBenchmarkRunner:
+    # Map package names to their multi-sig executable names
+    EXECUTABLE_NAMES = {
+        "sphincs-btc": "main_multi",
+        "sphincs-poseidon": "poseidon_multi",
+    }
+
     def __init__(self, workspace_root: Path, package: str = "sphincs-btc"):
         self.workspace_root = workspace_root
         self.package = package
         self.sphincs_package = workspace_root / "packages" / package
+        self.executable_name = self.EXECUTABLE_NAMES.get(package, "main_multi")
         self.target_dir = workspace_root / "target"
         self.results_dir = workspace_root / "benchmarks" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -123,7 +130,7 @@ class MultiSigBenchmarkRunner:
             "scarb", "--profile", "release", "execute",
             "--no-build",
             "--package", scarb_package,
-            "--executable-name", "main_multi",
+            "--executable-name", self.executable_name,
             "--print-resource-usage",
             "--arguments-file", args_file
         ]
@@ -196,7 +203,8 @@ class MultiSigBenchmarkRunner:
 
         try:
             proving_task["tasks"][0]["user_args_file"] = str(Path(args_file).resolve())
-            proving_task["tasks"][0]["path"] = str((self.target_dir / "release" / "main_multi.executable.json").resolve())
+            executable_file = f"{self.executable_name}.executable.json"
+            proving_task["tasks"][0]["path"] = str((self.target_dir / "release" / executable_file).resolve())
         except Exception as exc:
             return {"success": False, "error": f"Failed to patch proving task: {exc}"}
 
@@ -233,8 +241,10 @@ class MultiSigBenchmarkRunner:
         prover_time = time.time() - start_time
         
         if result.returncode != 0:
-            print(f"Proof generation failed: {result.stderr}")
-            return {"success": False, "error": result.stderr, "prover_time": prover_time}
+            print(f"Proof generation failed (return code: {result.returncode})")
+            print(f"\n--- STDOUT ---\n{result.stdout}" if result.stdout else "\n--- STDOUT ---\n(empty)")
+            print(f"\n--- STDERR ---\n{result.stderr}" if result.stderr else "\n--- STDERR ---\n(empty)")
+            return {"success": False, "error": result.stderr, "stdout": result.stdout, "prover_time": prover_time}
         
         print(f"✓ Proof generated in {prover_time:.2f}s")
         

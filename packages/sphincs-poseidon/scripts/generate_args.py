@@ -744,6 +744,38 @@ def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int,
     return result
 
 
+def serialize_multi_sig_vector(sigs: list, pk_seed: int, pk_root: int, messages: list) -> List[int]:
+    """Serialize multiple signatures to Cairo-compatible format for MultiSigArgs."""
+    result = []
+
+    # === Public key (shared for all signatures) ===
+    result.append(pk_seed)   # felt252
+    result.append(pk_root)   # felt252
+
+    # === Number of signatures ===
+    result.append(len(sigs))
+
+    # === Each (signature, message) pair ===
+    for sig, (msg_u32, last_word, last_num_bytes) in zip(sigs, messages):
+        # Signature
+        result.append(sig['randomizer'])  # felt252
+
+        # FORS signature: 14 trees * (sk + 12 auth_path entries)
+        for sk, auth in sig['fors_sig']:
+            result.append(sk)      # felt252
+            result.extend(auth)    # 12 felt252 values
+
+        # WOTS Merkle signatures: 7 layers
+        for wots_sig in sig['wots_sigs']:
+            result.extend(wots_sig['chains'])     # 35 felt252 values
+            result.extend(wots_sig['auth_path'])  # 9 felt252 values
+
+        # Message as WordArray
+        result.extend(message_to_wordarray_felts(msg_u32, last_word, last_num_bytes))
+
+    return result
+
+
 def main():
     """Generate SPHINCS+ Poseidon test vectors."""
     parser = argparse.ArgumentParser(
@@ -816,16 +848,13 @@ def main():
         sig = signer.sign(message_u32, last_word, last_num_bytes)
         sigs.append(sig)
 
-    # Serialize (single signature for now)
-    msg_u32, msg_last_word, msg_last_num_bytes = messages[0]
+    # Serialize
     if args.num_signatures == 1:
+        msg_u32, msg_last_word, msg_last_num_bytes = messages[0]
         result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
                                        msg_u32, msg_last_word, msg_last_num_bytes)
     else:
-        # For now, only output first signature (can extend to multi-sig later)
-        print("\nWarning: Multi-signature format not yet implemented, outputting first signature only", file=sys.stderr)
-        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
-                                       msg_u32, msg_last_word, msg_last_num_bytes)
+        result = serialize_multi_sig_vector(sigs, pk_seed, signer.pk_root, messages)
 
     print(f"\nTotal elements: {len(result)}", file=sys.stderr)
     print(f"Signature(s) generated successfully!", file=sys.stderr)

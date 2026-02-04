@@ -8,7 +8,7 @@ use crate::hasher::{
     thash,
 };
 use crate::params_128s::{SPX_D, SPX_TREE_HEIGHT};
-use crate::word_array::{WordSpan, WordSpanTrait};
+use crate::word_array::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
 use crate::wots::{WotsSignature, WotsSignatureDefault, WotsSignatureSerde, wots_pk_from_sig};
 
 #[derive(Drop, Serde, Default, Copy)]
@@ -123,6 +123,24 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
 
     // Check if the root node equals the root node in the public key.
     return root == pk_root;
+}
+
+/// Verify multiple SPHINCS+ signatures in batch.
+/// Returns true if ALL signatures are valid, false if ANY signature is invalid.
+pub fn verify_128s_batch(
+    sig_msg_pairs: Span<(SphincsSignature, WordArray)>, pk: SphincsPublicKey,
+) -> bool {
+    let mut iter = sig_msg_pairs;
+    let mut all_valid = true;
+
+    for (sig, message) in iter {
+        let valid = verify_128s(message.span(), *sig, pk);
+        if !valid {
+            all_valid = false;
+        }
+    }
+
+    all_valid
 }
 
 /// Split the extended message digest into the message hash, tree address and leaf index.

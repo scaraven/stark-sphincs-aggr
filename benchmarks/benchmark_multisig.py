@@ -20,9 +20,10 @@ import sys
 
 
 class MultiSigBenchmarkRunner:
-    def __init__(self, workspace_root: Path):
+    def __init__(self, workspace_root: Path, package: str = "sphincs-btc"):
         self.workspace_root = workspace_root
-        self.sphincs_package = workspace_root / "packages" / "sphincs-btc"
+        self.package = package
+        self.sphincs_package = workspace_root / "packages" / package
         self.target_dir = workspace_root / "target"
         self.results_dir = workspace_root / "benchmarks" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -78,13 +79,15 @@ class MultiSigBenchmarkRunner:
             "stderr": result.stderr
         }
 
-    def build_sphincs_btc(self) -> Dict[str, Any]:
-        """Build SPHINCS+ BTC package."""
+    def build_package(self) -> Dict[str, Any]:
+        """Build the target package."""
         print(f"\n{'='*60}")
-        print("Building sphincs-btc package...")
+        print(f"Building {self.package} package...")
         print(f"{'='*60}")
-        
-        cmd = ["scarb", "--profile", "release", "build", "--package", "sphincs_btc"]
+
+        # Convert package name to scarb package name (e.g., sphincs-btc -> sphincs_btc)
+        scarb_package = self.package.replace("-", "_")
+        cmd = ["scarb", "--profile", "release", "build", "--package", scarb_package]
         
         start_time = time.time()
         result = subprocess.run(
@@ -111,13 +114,15 @@ class MultiSigBenchmarkRunner:
     def execute_program(self, args_file: str) -> Dict[str, Any]:
         """Execute Cairo program with multi-sig args."""
         print(f"\n{'='*60}")
-        print("Executing sphincs-btc program...")
+        print(f"Executing {self.package} program...")
         print(f"{'='*60}")
-        
+
+        # Convert package name to scarb package name (e.g., sphincs-btc -> sphincs_btc)
+        scarb_package = self.package.replace("-", "_")
         cmd = [
             "scarb", "--profile", "release", "execute",
             "--no-build",
-            "--package", "sphincs_btc",
+            "--package", scarb_package,
             "--executable-name", "main_multi",
             "--print-resource-usage",
             "--arguments-file", args_file
@@ -199,7 +204,8 @@ class MultiSigBenchmarkRunner:
         with open(patched_task_path, "w") as f:
             json.dump(proving_task, f)
         
-        proof_output_dir = self.target_dir / "execute" / "sphincs_btc" / "execution1" / "proof"
+        scarb_package = self.package.replace("-", "_")
+        proof_output_dir = self.target_dir / "execute" / scarb_package / "execution1" / "proof"
         proof_output_dir.mkdir(parents=True, exist_ok=True)
         proof_output_path = proof_output_dir / "proof.json"
         
@@ -279,7 +285,7 @@ class MultiSigBenchmarkRunner:
             return benchmark_result
         
         # Step 2: Build (once)
-        build_metrics = self.build_sphincs_btc()
+        build_metrics = self.build_package()
         benchmark_result["build"] = build_metrics
         
         if not build_metrics["success"]:
@@ -355,7 +361,7 @@ class MultiSigBenchmarkRunner:
     def _save_summary(self, result: Dict[str, Any], output_file: Path):
         """Save human-readable summary."""
         with open(output_file, 'w') as f:
-            f.write("SPHINCS+ BTC Multi-Signature Benchmark Results\n")
+            f.write(f"{self.package} Multi-Signature Benchmark Results\n")
             f.write(f"{'='*60}\n\n")
             
             f.write(f"Benchmark\n")
@@ -416,7 +422,12 @@ def main():
         action='store_true',
         help='Skip STARK proof generation'
     )
-    
+    parser.add_argument(
+        '--package', '-p',
+        default='sphincs-btc',
+        help='Package to benchmark (default: sphincs-btc)'
+    )
+
     args = parser.parse_args()
 
     if args.num_signatures <= 1:
@@ -426,7 +437,7 @@ def main():
     # Find workspace root
     workspace_root = Path(__file__).parent.parent
     
-    runner = MultiSigBenchmarkRunner(workspace_root)
+    runner = MultiSigBenchmarkRunner(workspace_root, args.package)
     
     # Run benchmark sweep
     results = runner.run_sweep(

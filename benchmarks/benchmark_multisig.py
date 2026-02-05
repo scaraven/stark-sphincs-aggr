@@ -37,6 +37,45 @@ class MultiSigBenchmarkRunner:
         self.temp_args_dir = self.results_dir / "temp_args"
         self.temp_args_dir.mkdir(parents=True, exist_ok=True)
 
+    def _get_or_generate_args(
+        self,
+        num_sigs: int,
+        seed: int,
+        message_prefix: str,
+        reuse_args: Optional[str]
+    ) -> Dict[str, Any]:
+        """Get existing args file or generate new signatures."""
+        if reuse_args is None:
+            # No reuse requested, generate new signatures
+            return self.generate_multi_sig_args(num_sigs, seed, message_prefix)
+
+        # Determine which file to check
+        if isinstance(reuse_args, str) and reuse_args not in (True, "True", "true"):
+            # User specified a specific file path
+            args_file = Path(reuse_args)
+        else:
+            # Auto-detect based on naming convention
+            args_file = self.temp_args_dir / f"multisig_n{num_sigs}_seed{seed}.json"
+
+        if args_file.exists():
+            print(f"\n{'='*60}")
+            print(f"Reusing existing args file: {args_file}")
+            print(f"{'='*60}")
+            return {
+                "success": True,
+                "generation_time": 0.0,
+                "args_file": str(args_file),
+                "num_signatures": num_sigs,
+                "seed": seed,
+                "reused": True,
+            }
+        else:
+            print(f"\n{'='*60}")
+            print(f"Args file not found: {args_file}")
+            print(f"Generating new signatures...")
+            print(f"{'='*60}")
+            return self.generate_multi_sig_args(num_sigs, seed, message_prefix)
+
     def generate_multi_sig_args(self, num_sigs: int, seed: int, message_prefix: str = "test") -> Dict[str, Any]:
         """Generate multi-signature test vectors."""
         print(f"\n{'='*60}")
@@ -270,7 +309,8 @@ class MultiSigBenchmarkRunner:
         num_sigs: int,
         seed: int,
         message_prefix: str = "test",
-        run_proof: bool = True
+        run_proof: bool = True,
+        reuse_args: Optional[str] = None
     ) -> Dict[str, Any]:
         """Run a complete multi-sig benchmark."""
         print(f"\n{'#'*60}")
@@ -279,18 +319,18 @@ class MultiSigBenchmarkRunner:
         print(f"# Seed: {seed}")
         print(f"# Timestamp: {datetime.now().isoformat()}")
         print(f"{'#'*60}")
-        
+
         benchmark_result = {
             "timestamp": datetime.now().isoformat(),
             "num_signatures": num_sigs,
             "seed": seed,
             "message_prefix": message_prefix,
         }
-        
-        # Step 1: Generate signatures
-        gen_metrics = self.generate_multi_sig_args(num_sigs, seed, message_prefix)
+
+        # Step 1: Generate signatures (or reuse existing)
+        gen_metrics = self._get_or_generate_args(num_sigs, seed, message_prefix, reuse_args)
         benchmark_result["generation"] = gen_metrics
-        
+
         if not gen_metrics["success"]:
             return benchmark_result
         
@@ -344,10 +384,11 @@ class MultiSigBenchmarkRunner:
         sig_counts: int,
         seed: int,
         message_prefix: str = "test",
-        run_proof: bool = True
+        run_proof: bool = True,
+        reuse_args: Optional[str] = None
     ) -> Dict[str, Any]:
         """Run benchmarks for multiple signature counts and seeds."""
-        result = self.run_benchmark(sig_counts, seed, message_prefix, run_proof)
+        result = self.run_benchmark(sig_counts, seed, message_prefix, run_proof, reuse_args)
         return result
 
     def save_results(self, result: Dict[str, Any], output_file: str = None):
@@ -437,6 +478,13 @@ def main():
         default='sphincs-btc',
         help='Package to benchmark (default: sphincs-btc)'
     )
+    parser.add_argument(
+        '--reuse-args',
+        nargs='?',
+        const=True,
+        default=False,
+        help='Skip signature generation if args file exists. Optionally specify a file path to use.'
+    )
 
     args = parser.parse_args()
 
@@ -454,7 +502,8 @@ def main():
         sig_counts=args.num_signatures,
         seed=args.seed,
         message_prefix=args.message_prefix,
-        run_proof=not args.skip_proof
+        run_proof=not args.skip_proof,
+        reuse_args=args.reuse_args
     )
     
     # Save results

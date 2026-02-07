@@ -24,6 +24,15 @@ pub struct SpxCtx {
     state_seeded: HashState,
 }
 
+/// Partially-absorbed Poseidon state for reuse across related hash calls.
+/// This holds a Poseidon state that has already absorbed pk_seed and some
+/// address components, allowing subsequent calls to absorb only the remaining
+/// components and data, significantly reducing the number of Poseidon permutations.
+#[derive(Drop, Copy)]
+pub struct PartialCtx {
+    pub state: HashState,
+}
+
 /// Absorb the constant pub_seed using one round of the compression function
 /// This initializes `state_seeded`, which can then be reused in `thash`.
 pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
@@ -31,6 +40,27 @@ pub fn initialize_hash_function(pk_seed: HashOutput) -> SpxCtx {
     hash_init(ref state);
     state.state = state.state.update(pk_seed);
     SpxCtx { state_seeded: state }
+}
+
+/// Pre-absorb pk_seed + 4 address words (a0-a3).
+/// Reusable across hash calls that share w0-w3 (e.g., within a FORS tree or Merkle tree traversal).
+pub fn partial_seed_4(
+    ctx: SpxCtx, a0: felt252, a1: felt252, a2: felt252, a3: felt252,
+) -> PartialCtx {
+    let mut state = ctx.state_seeded;
+    state.state = state.state.update_with([a0, a1, a2, a3]);
+    PartialCtx { state }
+}
+
+/// Pre-absorb pk_seed + 5 address words (a0-a4).
+/// Reusable across hash calls that share w0-w4 (e.g., within a WOTS chain).
+pub fn partial_seed_5(
+    ctx: SpxCtx, a0: felt252, a1: felt252, a2: felt252, a3: felt252, a4: felt252,
+) -> PartialCtx {
+    let mut state = ctx.state_seeded;
+    state.state = state.state.update_with([a0, a1, a2, a3]);
+    state.state = state.state.update(a4);
+    PartialCtx { state }
 }
 
 #[inline]
@@ -61,6 +91,34 @@ pub fn thash_single(ctx: SpxCtx, address: @Address, data: HashOutput) -> HashOut
 
 pub fn thash_2(ctx: SpxCtx, address: @Address, data0: HashOutput, data1: HashOutput) -> HashOutput {
     let mut state = seed_address(ctx, address);
+    hash_finalize_2(ref state, data0, data1)
+}
+
+/// thash_single absorbing only a5 + data.
+/// Used with a PartialCtx that has already absorbed pk_seed + a0-a4.
+pub fn thash_single_partial_5(pctx: PartialCtx, a5: felt252, data: HashOutput) -> HashOutput {
+    let mut state = pctx.state;
+    state.state = state.state.update(a5);
+    hash_finalize_1(ref state, data)
+}
+
+/// thash_single absorbing a4 + a5 + data.
+/// Used with a PartialCtx that has already absorbed pk_seed + a0-a3.
+pub fn thash_single_partial_4(
+    pctx: PartialCtx, a4: felt252, a5: felt252, data: HashOutput,
+) -> HashOutput {
+    let mut state = pctx.state;
+    state.state = state.state.update_with([a4, a5]);
+    hash_finalize_1(ref state, data)
+}
+
+/// thash_2 absorbing a4 + a5 + data0 + data1.
+/// Used with a PartialCtx that has already absorbed pk_seed + a0-a3.
+pub fn thash_2_partial_4(
+    pctx: PartialCtx, a4: felt252, a5: felt252, data0: HashOutput, data1: HashOutput,
+) -> HashOutput {
+    let mut state = pctx.state;
+    state.state = state.state.update_with([a4, a5]);
     hash_finalize_2(ref state, data0, data1)
 }
 
@@ -105,15 +163,13 @@ pub fn hash_message_128s(
     // Compute the seed for XOF.
     let seed = poseidon::hash_finalize(ref state, data.span());
 
-    let mut xof_data: Array<felt252> = array![];
-    xof_data.append(randomizer);
-    xof_data.append(pk_seed);
-    xof_data.append(seed);
-    xof_data.append(0); // MGF1 counter = 0
-
-    // Apply MGF1 to the seed.
+    // Apply MGF1 to the seed - optimized to avoid array allocation.
     poseidon::hash_init(ref state);
-    let buffer = poseidon::hash_finalize(ref state, xof_data.span());
+    state.state = state.state.update(randomizer);
+    state.state = state.state.update(pk_seed);
+    state.state = state.state.update(seed);
+    state.state = state.state.update(0); // MGF1 counter = 0
+    let buffer = state.state.finalize();
 
     buffer
 }
@@ -148,6 +204,44 @@ pub fn compute_root(
         address.set_tree_index(leaf_idx + idx_offset);
 
         node = thash_2(ctx, @address, word0, word1);
+    }
+
+    node
+}
+
+/// Compute the root of a tree given the leaf and authentication path,
+/// using a pre-built PartialCtx that has already absorbed pk_seed + a0-a3.
+/// This avoids redundant absorption when processing multiple trees with shared address prefixes.
+pub fn compute_root_with_pctx(
+    pctx: PartialCtx,
+    address: @Address,
+    leaf: HashOutput,
+    mut auth_path: Span<HashOutput>,
+    mut leaf_idx: u32,
+    mut idx_offset: u32,
+) -> HashOutput {
+    let mut node = leaf;
+    let mut i = 0;
+    let mut address = address.clone();
+
+    while let Some(hash_witness) = auth_path.pop_front() {
+        let (q, r) = DivRem::div_rem(leaf_idx, 2);
+
+        let (word0, word1) = if r == 0 {
+            (node, *hash_witness)
+        } else {
+            (*hash_witness, node)
+        };
+
+        i += 1;
+        leaf_idx = q;
+        idx_offset /= 2;
+
+        address.set_tree_height(i);
+        address.set_tree_index(leaf_idx + idx_offset);
+
+        let [_, _, _, _, a4, a5] = address.into_field_components();
+        node = thash_2_partial_4(pctx, a4, a5, word0, word1);
     }
 
     node

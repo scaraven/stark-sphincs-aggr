@@ -120,12 +120,12 @@ SPHINCS+ uses a tweakable hash function with an "address" parameter that provide
 
 **Dense encoding** (default): 22-byte packed format optimized for Blake2s/SHA-256
 - Layout: layer(1) + tree_addr(7) + type(1) + pad(1) + keypair(2) + pad(2) + tree_height/chain_addr(1) + tree_index/hash_addr(3)
-- Used by `sphincs-btc` and `sphincs-plus` (feature: `sparse_addr` disables)
+- Used by `sphincs-btc` and `sphincs-plus` and `sphincs-poseidon` (feature: `sparse_addr` disables)
 
 **Sparse encoding** (feature-gated): Field-element encoding for Poseidon
 - Each field encodes logical components separately
-- `into_field_components()` returns `[felt252; 6]` for Poseidon absorption
-- Used by `sphincs-poseidon`
+- `into_field_components()` returns `[felt252; 8]` for Poseidon absorption
+- Not used by anyone, this is an obselete feature
 
 ### SPHINCS+ Verification Flow
 

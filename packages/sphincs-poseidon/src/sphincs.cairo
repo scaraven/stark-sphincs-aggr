@@ -4,8 +4,8 @@
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, fors_pk_from_sig};
 use crate::hasher::{
-    HashOutput, compute_root, felt252_to_u32_array, hash_message_128s, initialize_hash_function,
-    thash,
+    HashOutput, SpxCtx, compute_root, felt252_to_u32_array, hash_message_128s,
+    initialize_hash_function, thash, partial_seed_4, compute_root_with_pctx,
 };
 use crate::params_128s::{SPX_D, SPX_TREE_HEIGHT};
 use crate::word_array::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
@@ -39,11 +39,17 @@ pub struct XMessageDigest {
 
 /// Verify a signature for Sphincs+ instantiated with 128s parameters.
 pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKey) -> bool {
+    let ctx = initialize_hash_function(pk.pk_seed);
+    verify_128s_with_ctx(ctx, message, sig, pk)
+}
+
+/// Verify a signature using a pre-initialized hash context.
+/// This allows sharing the context across multiple signatures in batch verification.
+pub fn verify_128s_with_ctx(
+    ctx: SpxCtx, message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKey,
+) -> bool {
     let SphincsSignature { randomizer, fors_sig, wots_merkle_sig_list } = sig;
     let SphincsPublicKey { pk_seed, pk_root } = pk;
-
-    // Seed the hash function state.
-    let ctx = initialize_hash_function(pk_seed);
 
     // Initialize address
     let mut tree_addr: Address = Default::default();
@@ -106,9 +112,13 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
 
         debug_print_leaf(leaf);
 
-        // Compute the root node of this subtree.
-        // Auth path has fixed length, so we don't need to assert tree height.
-        root = compute_root(ctx, @tree_addr, leaf, auth_path.span(), leaf_idx.into(), 0);
+        // Compute the root node of this subtree using optimized partial context.
+        // Pre-absorb pk_seed + a0-a3 (constant within this tree traversal).
+        let [a0, a1, a2, a3, _, _] = tree_addr.into_field_components();
+        let tree_pctx = partial_seed_4(ctx, a0, a1, a2, a3);
+        root = compute_root_with_pctx(
+            tree_pctx, @tree_addr, leaf, auth_path.span(), leaf_idx.into(), 0,
+        );
 
         debug_print_computed_root(root);
 
@@ -127,14 +137,18 @@ pub fn verify_128s(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKe
 
 /// Verify multiple SPHINCS+ signatures in batch.
 /// Returns true if ALL signatures are valid, false if ANY signature is invalid.
+/// Optimized to share the hash context across all signatures since they use the same pk_seed.
 pub fn verify_128s_batch(
     sig_msg_pairs: Span<(SphincsSignature, WordArray)>, pk: SphincsPublicKey,
 ) -> bool {
+    // Initialize context once for all signatures (shared pk_seed).
+    let ctx = initialize_hash_function(pk.pk_seed);
+
     let mut iter = sig_msg_pairs;
     let mut all_valid = true;
 
     for (sig, message) in iter {
-        let valid = verify_128s(message.span(), *sig, pk);
+        let valid = verify_128s_with_ctx(ctx, message.span(), *sig, pk);
         if !valid {
             all_valid = false;
         }

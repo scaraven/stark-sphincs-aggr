@@ -7,7 +7,10 @@
 //! overview and https://www.di-mgt.com.au/pqc-09-fors-sig.html for a step-by-step construction.
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait, AddressType};
-use crate::hasher::{HashOutput, SpxCtx, compute_root, thash_fors_tree_root, thash_single};
+use crate::hasher::{
+    HashOutput, SpxCtx, compute_root, thash_fors_tree_root, thash_single, partial_seed_4,
+    thash_single_partial_4, compute_root_with_pctx,
+};
 use crate::params_128s::{SPX_FORS_BASE_OFFSET, SPX_FORS_HEIGHT, SPX_FORS_TREES};
 use crate::word_array::{WordSpan, WordSpanTrait};
 
@@ -22,11 +25,18 @@ pub struct ForsTreeSignature {
 }
 
 /// Derive FORS public key from a signature.
+/// Optimized to pre-absorb pk_seed + a0-a3 (shared across all 14 FORS trees),
+/// then absorb only a4-a5 + data for each operation.
 pub fn fors_pk_from_sig(
     ctx: SpxCtx, mut sig: ForsSignature, mhash: WordSpan, address: @Address,
 ) -> HashOutput {
     let mut fors_tree_addr = address.clone();
     fors_tree_addr.set_address_type(AddressType::FORSTREE);
+
+    // Pre-absorb pk_seed + a0-a3 (constant across all FORS trees).
+    // All 14 trees share layer=0, same hypertree_addr, type=FORSTREE, same keypair.
+    let [a0, a1, a2, a3, _, _] = fors_tree_addr.into_field_components();
+    let pctx = partial_seed_4(ctx, a0, a1, a2, a3);
 
     // Compute indices of leaves of the FORS trees
     let mut indices = message_to_indices_128s(mhash);
@@ -44,12 +54,17 @@ pub fn fors_pk_from_sig(
         // NOTE: already zero `fors_tree_addr.set_tree_height(0);`
         fors_tree_addr.set_tree_index(idx_offset + leaf_idx);
 
+        // Extract only the varying address components (a4, a5).
+        let [_, _, _, _, a4, a5] = fors_tree_addr.into_field_components();
+
         // Derive the leaf hash from the secret key seed and tree address.
-        let leaf = thash_single(ctx, @fors_tree_addr, sk_seed);
+        let leaf = thash_single_partial_4(pctx, a4, a5, sk_seed);
 
         // Derive the corresponding root node of this tree.
         // Auth path has fixed length, so we don't need to assert tree height.
-        let root = compute_root(ctx, @fors_tree_addr, leaf, auth_path.span(), leaf_idx, idx_offset);
+        let root = compute_root_with_pctx(
+            pctx, @fors_tree_addr, leaf, auth_path.span(), leaf_idx, idx_offset,
+        );
         roots.append(root);
 
         idx_offset += SPX_FORS_BASE_OFFSET;

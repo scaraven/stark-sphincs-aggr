@@ -17,9 +17,11 @@ Parameters:
 """
 
 import hashlib
+import os
 import struct
 import json
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # === Parameters ===
 SPX_N = 16  # hash output bytes
@@ -540,16 +542,19 @@ def bytes_to_u32s(data: bytes) -> list:
 class SphinxBtcSigner:
     """Complete SPHINCS+ BTC signer with WOTS+C grinding."""
 
-    def __init__(self, sk_seed: bytes, pk_seed: bytes):
+    def __init__(self, sk_seed: bytes, pk_seed: bytes, pk_root: bytes = None):
         assert len(sk_seed) == SPX_N
         assert len(pk_seed) == SPX_N
         self.sk_seed = sk_seed
         self.pk_seed = pk_seed
 
-        # Compute public key root (this is expensive - computes full hypertree)
-        print("Computing public key root (this may take a while)...", file=sys.stderr)
-        self.pk_root = self._compute_pk_root()
-        print(f"Public key root: {self.pk_root.hex()}", file=sys.stderr)
+        if pk_root is not None:
+            self.pk_root = pk_root
+        else:
+            # Compute public key root (this is expensive - computes full hypertree)
+            print("Computing public key root (this may take a while)...", file=sys.stderr)
+            self.pk_root = self._compute_pk_root()
+            print(f"Public key root: {self.pk_root.hex()}", file=sys.stderr)
 
     def _compute_pk_root(self) -> bytes:
         """Compute the top-level root of the hypertree."""
@@ -558,7 +563,7 @@ class SphinxBtcSigner:
         addr.set_tree_addr(0)
         return ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
 
-    def sign(self, message: bytes) -> dict:
+    def sign(self, message: bytes, quiet: bool = False) -> dict:
         """Sign a message with full SPHINCS+ BTC signature."""
         # Generate randomizer (deterministic for reproducibility)
         randomizer = blake2s_raw(self.sk_seed + message)[:SPX_N]
@@ -567,7 +572,8 @@ class SphinxBtcSigner:
         digest = hash_message(randomizer, self.pk_seed, self.pk_root, message)
         mhash, tree_addr, leaf_idx = split_digest(digest)
 
-        print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}", file=sys.stderr)
+        if not quiet:
+            print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}", file=sys.stderr)
 
         # FORS address
         fors_addr = Address()
@@ -577,12 +583,14 @@ class SphinxBtcSigner:
         fors_addr.set_keypair(leaf_idx)
 
         # Generate FORS signature
-        print("Generating FORS signature...", file=sys.stderr)
+        if not quiet:
+            print("Generating FORS signature...", file=sys.stderr)
         fors_sig = fors_sign(self.pk_seed, self.sk_seed, mhash, fors_addr)
 
         # Compute FORS public key (this is what layer 0 WOTS signs)
         fors_root = fors_pk(self.pk_seed, self.sk_seed, fors_addr)
-        print(f"FORS root: {fors_root.hex()}", file=sys.stderr)
+        if not quiet:
+            print(f"FORS root: {fors_root.hex()}", file=sys.stderr)
 
         # WOTS+C signatures for each hypertree layer
         wots_sigs = []
@@ -591,7 +599,8 @@ class SphinxBtcSigner:
         current_root = fors_root  # Message for layer 0
 
         for layer in range(SPX_D):
-            print(f"Layer {layer}: tree_addr={current_tree_addr}, leaf_idx={current_leaf_idx}", file=sys.stderr)
+            if not quiet:
+                print(f"Layer {layer}: tree_addr={current_tree_addr}, leaf_idx={current_leaf_idx}", file=sys.stderr)
 
             # Address for this layer
             addr = Address()
@@ -601,11 +610,13 @@ class SphinxBtcSigner:
             addr.set_type(Address.WOTS)
 
             # Grind for valid counter
-            print(f"  Grinding for WOTS+C counter...", file=sys.stderr)
+            if not quiet:
+                print(f"  Grinding for WOTS+C counter...", file=sys.stderr)
             modified_message, counter = grind_wots_counter(
                 self.pk_seed, addr, current_root
             )
-            print(f"  Found counter: {counter}", file=sys.stderr)
+            if not quiet:
+                print(f"  Found counter: {counter}", file=sys.stderr)
 
             # Sign with WOTS using modified message
             sig_chains = wots_sign(self.pk_seed, self.sk_seed, modified_message, addr)
@@ -631,6 +642,13 @@ class SphinxBtcSigner:
             'fors_sig': fors_sig,
             'wots_sigs': wots_sigs
         }
+
+
+def _sign_worker(sk_seed, pk_seed, pk_root, message, index):
+    """Worker function for parallel signature generation."""
+    signer = SphinxBtcSigner(sk_seed, pk_seed, pk_root=pk_root)
+    sig = signer.sign(message, quiet=True)
+    return index, sig
 
 
 def serialize_test_vector(sig: dict, pk_seed: bytes, pk_root: bytes, message: bytes) -> list:
@@ -767,7 +785,16 @@ def main():
         default=None,
         help='Output file (default: stdout)'
     )
+    parser.add_argument(
+        '--workers', '-w',
+        type=int,
+        default=None,
+        help='Number of parallel workers (default: cpu_count for multi-sig, 1 for single)'
+    )
     args = parser.parse_args()
+
+    if args.workers is None:
+        args.workers = os.cpu_count() if args.num_signatures > 1 else 1
     
     print("=== SPHINCS+ BTC Test Vector Generator ===", file=sys.stderr)
     print(f"Parameters: n={SPX_N}, h={SPX_FULL_HEIGHT}, d={SPX_D}, k={SPX_FORS_TREES}, a={SPX_FORS_HEIGHT}", file=sys.stderr)
@@ -786,15 +813,32 @@ def main():
     # Create signer
     signer = SphinxBtcSigner(sk_seed, pk_seed)
 
-    # Generate multiple signatures
-    sigs = []
+    # Generate messages
     messages = []
     for i in range(args.num_signatures):
-        message = f"{args.message_prefix}{i}".encode()
-        messages.append(message)
-        print(f"\nSigning message {i+1}/{args.num_signatures}: {message}", file=sys.stderr)
-        sig = signer.sign(message)
-        sigs.append(sig)
+        messages.append(f"{args.message_prefix}{i}".encode())
+
+    # Generate signatures
+    if args.workers <= 1 or args.num_signatures == 1:
+        # Sequential (preserves progress output)
+        sigs = []
+        for i, message in enumerate(messages):
+            print(f"\nSigning message {i+1}/{args.num_signatures}: {message}", file=sys.stderr)
+            sig = signer.sign(message)
+            sigs.append(sig)
+    else:
+        # Parallel
+        print(f"\nSigning {args.num_signatures} messages using {args.workers} workers...", file=sys.stderr)
+        sigs = [None] * args.num_signatures
+        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(_sign_worker, sk_seed, pk_seed, signer.pk_root, msg, i): i
+                for i, msg in enumerate(messages)
+            }
+            for future in as_completed(futures):
+                idx, sig = future.result()
+                sigs[idx] = sig
+                print(f"  Completed signature {idx+1}/{args.num_signatures}", file=sys.stderr)
 
     # Serialize
     if args.num_signatures == 1:

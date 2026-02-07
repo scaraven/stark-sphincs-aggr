@@ -160,8 +160,8 @@ pub mod hex {
         let mut i = 0;
 
         while i != num_characters {
-            let hi = hex_char_to_nibble(hex_string[i]);
-            let lo = hex_char_to_nibble(hex_string[i + 1]);
+            let hi = hex_char_to_nibble(hex_string[i]).unwrap();
+            let lo = hex_char_to_nibble(hex_string[i + 1]).unwrap();
             words.append_u8(hi * 16 + lo);
             i += 2;
         }
@@ -194,18 +194,18 @@ pub mod hex {
         result
     }
 
-    pub fn hex_char_to_nibble(hex_char: u8) -> u8 {
+    pub fn hex_char_to_nibble(hex_char: u8) -> Result<u8, ByteArray> {
         if hex_char >= 48 && hex_char <= 57 {
             // 0-9
-            hex_char - 48
+            Ok(hex_char - 48)
         } else if hex_char >= 65 && hex_char <= 70 {
             // A-F
-            hex_char - 55
+            Ok(hex_char - 55)
         } else if hex_char >= 97 && hex_char <= 102 {
             // a-f
-            hex_char - 87
+            Ok(hex_char - 87)
         } else {
-            panic!("Invalid hex character: {hex_char}");
+            Err(format!("Invalid hex character: {hex_char}"))
         }
     }
 }

@@ -10,7 +10,7 @@
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait};
 use crate::hasher::{
-    HashOutput, HashOutputSerde, SpxCtx, thash_single, partial_seed_5, thash_single_partial_5,
+    HashOutput, HashOutputSerde, SpxCtx, partial_seed_5, thash_single_partial_5,
 };
 use crate::params_128s::SPX_WOTS_LEN;
 
@@ -97,7 +97,7 @@ pub fn chain_hash_128s(
         return input;
     }
 
-    let mut wots_addr = address.clone();
+    let mut wots_addr = *address;
     wots_addr.set_wots_addr(chain_idx + length);
 
     // Pre-absorb pk_seed + a0-a4 (constant within this chain).

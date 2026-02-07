@@ -8,8 +8,8 @@
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::hasher::{
-    HashOutput, SpxCtx, compute_root, thash_fors_tree_root, thash_single, partial_seed_4,
-    thash_single_partial_4, compute_root_with_pctx,
+    HashOutput, SpxCtx, thash_fors_tree_root, partial_seed_4, thash_single_partial_4,
+    compute_root_with_pctx,
 };
 use crate::params_128s::{SPX_FORS_BASE_OFFSET, SPX_FORS_HEIGHT, SPX_FORS_TREES};
 use crate::word_array::{WordSpan, WordSpanTrait};
@@ -30,7 +30,7 @@ pub struct ForsTreeSignature {
 pub fn fors_pk_from_sig(
     ctx: SpxCtx, mut sig: ForsSignature, mhash: WordSpan, address: @Address,
 ) -> HashOutput {
-    let mut fors_tree_addr = address.clone();
+    let mut fors_tree_addr = *address;
     fors_tree_addr.set_address_type(AddressType::FORSTREE);
 
     // Pre-absorb pk_seed + a0-a3 (constant across all FORS trees).
@@ -71,7 +71,7 @@ pub fn fors_pk_from_sig(
     }
 
     // Hash horizontally across all tree roots to derive the public key.
-    let mut fors_pk_addr = address.clone();
+    let mut fors_pk_addr = *address;
     fors_pk_addr.set_address_type(AddressType::FORSPK);
 
     let mut roots_sp = roots.span();

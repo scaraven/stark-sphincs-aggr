@@ -4,8 +4,8 @@
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::fors::{ForsSignature, fors_pk_from_sig};
 use crate::hasher::{
-    HashOutput, SpxCtx, compute_root, felt252_to_u32_array, hash_message_128s,
-    initialize_hash_function, thash, partial_seed_4, compute_root_with_pctx,
+    HashOutput, SpxCtx, felt252_to_u32_array, hash_message_128s, initialize_hash_function, thash,
+    partial_seed_4, compute_root_with_pctx,
 };
 use crate::params_128s::{SPX_D, SPX_TREE_HEIGHT};
 use crate::word_array::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
@@ -82,11 +82,11 @@ pub fn verify_128s_with_ctx(
         tree_addr.set_hypertree_layer(layer);
         tree_addr.set_hypertree_addr(tree_address);
 
-        wots_addr = tree_addr.clone();
+        wots_addr = tree_addr;
         wots_addr.set_address_type(AddressType::WOTS);
         wots_addr.set_keypair(leaf_idx);
 
-        let mut wots_pk_addr = wots_addr.clone();
+        let mut wots_pk_addr = wots_addr;
         wots_pk_addr.set_address_type(AddressType::WOTSPK);
 
         // The WOTS public key is only correct if the signature was correct.

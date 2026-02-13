@@ -2,7 +2,7 @@
     "single_page": true,
     "tasks": [{
         "type": "Cairo1Executable",
-        "path": "target/release/main.executable.json",
+        "path": "target/release/main_multi.executable.json",
         "program_hash_function": "blake",
         "user_args_file": "benchmarks/results/temp_args/single_sig.json"
     }]

@@ -22,10 +22,25 @@ pub struct Args {
     pub message: WordArray,
 }
 
+#[derive(Drop, Serde)]
+pub struct MultiSigArgs {
+    /// SPHINCS+ Poseidon public key (shared across all signatures).
+    pub pk: SphincsPublicKey,
+    /// Array of signature-message pairs.
+    pub sig_msg_pairs: Array<(SphincsSignature, WordArray)>,
+}
+
 #[executable]
 fn main(args: Args) {
     let Args { pk, sig, message } = args;
     let res = sphincs::verify_128s(message.span(), sig, pk);
+    check_result(res);
+}
+
+#[executable]
+fn main_multi(args: MultiSigArgs) {
+    let MultiSigArgs { pk, sig_msg_pairs } = args;
+    let res = sphincs::verify_128s_batch(sig_msg_pairs.span(), pk);
     check_result(res);
 }
 

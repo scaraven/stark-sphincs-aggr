@@ -9,7 +9,9 @@
 
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait};
-use crate::hasher::{HashOutput, HashOutputSerde, SpxCtx, thash_single};
+use crate::hasher::{
+    HashOutput, HashOutputSerde, SpxCtx, partial_seed_5, thash_single_partial_5,
+};
 use crate::params_128s::SPX_WOTS_LEN;
 
 /// WOTS+ signature: array of partially hashed private keys.
@@ -86,6 +88,8 @@ pub fn add_checksum_128s(ref message_w: Array<u32>) {
 
 /// Compute the H^{steps}(input) hash chain given the chain length (start) and return the last
 /// digest.
+/// Optimized to pre-absorb pk_seed + a0-a4 (constant within chain), then absorb only a5 + data
+/// per step.
 pub fn chain_hash_128s(
     ctx: SpxCtx, input: HashOutput, length: u32, address: @Address, chain_idx: u32,
 ) -> HashOutput {
@@ -93,14 +97,18 @@ pub fn chain_hash_128s(
         return input;
     }
 
-    let mut wots_addr = address.clone();
+    let mut wots_addr = *address;
     wots_addr.set_wots_addr(chain_idx + length);
 
-    let mut output = thash_single(ctx, @wots_addr, input);
+    // Pre-absorb pk_seed + a0-a4 (constant within this chain).
+    // Only a5 (hash_addr) changes per step, dramatically reducing permutations.
+    let [a0, a1, a2, a3, a4, _] = wots_addr.into_field_components();
+    let pctx = partial_seed_5(ctx, a0, a1, a2, a3, a4);
+
+    let mut output = thash_single_partial_5(pctx, length.into(), input);
 
     for i in length + 1..15 { // SPX_WOTS_W - 1
-        wots_addr.set_wots_addr(chain_idx + i);
-        output = thash_single(ctx, @wots_addr, output);
+        output = thash_single_partial_5(pctx, i.into(), output);
     }
     output
 }

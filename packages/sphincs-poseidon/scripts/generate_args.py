@@ -15,8 +15,10 @@ Parameters (matching params_128s.cairo):
 - hash=Poseidon (arithmetic-friendly)
 """
 
+import os
 from typing import List
 from hash import poseidon_hash
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import argparse
 import json
 import sys
@@ -617,14 +619,17 @@ def split_digest(digest: int) -> tuple:
 class SphincsPoseidonSigner:
     """Complete SPHINCS+ Poseidon signer (no grinding, standard WOTS+)."""
 
-    def __init__(self, sk_seed: int, pk_seed: int):
+    def __init__(self, sk_seed: int, pk_seed: int, pk_root: int = None):
         self.sk_seed = sk_seed
         self.pk_seed = pk_seed
 
-        # Compute public key root
-        print("Computing public key root (this may take a while)...", file=sys.stderr)
-        self.pk_root = self._compute_pk_root()
-        print(f"Public key root: {hex(self.pk_root)}", file=sys.stderr)
+        if pk_root is not None:
+            self.pk_root = pk_root
+        else:
+            # Compute public key root
+            print("Computing public key root (this may take a while)...", file=sys.stderr)
+            self.pk_root = self._compute_pk_root()
+            print(f"Public key root: {hex(self.pk_root)}", file=sys.stderr)
 
     def _compute_pk_root(self) -> int:
         """Compute the top-level root of the hypertree. Returns felt252."""
@@ -633,13 +638,15 @@ class SphincsPoseidonSigner:
         addr.set_tree_addr(0)
         return ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
 
-    def sign(self, message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0) -> dict:
+    def sign(self, message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0,
+             quiet: bool = False) -> dict:
         """Sign a message with full SPHINCS+ signature.
 
         Args:
             message_u32: Message as list of u32 words (matching WordArray.input)
             last_word: Last partial word (matching WordArray.last_input_word)
             last_num_bytes: Number of valid bytes in last_word (matching WordArray.last_input_num_bytes)
+            quiet: If True, suppress per-layer progress output
         """
         # Generate randomizer (deterministic for reproducibility)
         # Use the same felt252 representation that Cairo uses for hashing
@@ -651,7 +658,8 @@ class SphincsPoseidonSigner:
                               message_u32, last_word, last_num_bytes)
         mhash, tree_addr, leaf_idx = split_digest(digest)
 
-        print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}", file=sys.stderr)
+        if not quiet:
+            print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}", file=sys.stderr)
 
         # FORS address
         fors_addr = Address()
@@ -661,12 +669,14 @@ class SphincsPoseidonSigner:
         fors_addr.set_keypair(leaf_idx)
 
         # Generate FORS signature
-        print("Generating FORS signature...", file=sys.stderr)
+        if not quiet:
+            print("Generating FORS signature...", file=sys.stderr)
         fors_sig = fors_sign(self.pk_seed, self.sk_seed, mhash, fors_addr)
 
         # Compute FORS public key (this is what layer 0 WOTS signs)
         fors_root = fors_pk(self.pk_seed, self.sk_seed, fors_addr)
-        print(f"FORS root: {hex(fors_root)}", file=sys.stderr)
+        if not quiet:
+            print(f"FORS root: {hex(fors_root)}", file=sys.stderr)
 
         # WOTS signatures for each hypertree layer
         wots_sigs = []
@@ -675,7 +685,8 @@ class SphincsPoseidonSigner:
         current_root = fors_root  # Message for layer 0
 
         for layer in range(SPX_D):
-            print(f"Layer {layer}: tree_addr={current_tree_addr}, leaf_idx={current_leaf_idx}", file=sys.stderr)
+            if not quiet:
+                print(f"Layer {layer}: tree_addr={current_tree_addr}, leaf_idx={current_leaf_idx}", file=sys.stderr)
 
             # Address for this layer
             addr = Address()
@@ -707,6 +718,13 @@ class SphincsPoseidonSigner:
             'fors_sig': fors_sig,
             'wots_sigs': wots_sigs
         }
+
+
+def _sign_worker(sk_seed, pk_seed, pk_root, message_u32, last_word, last_num_bytes, index):
+    """Worker function for parallel signature generation."""
+    signer = SphincsPoseidonSigner(sk_seed, pk_seed, pk_root=pk_root)
+    sig = signer.sign(message_u32, last_word, last_num_bytes, quiet=True)
+    return index, sig
 
 
 def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int,
@@ -744,6 +762,38 @@ def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int,
     return result
 
 
+def serialize_multi_sig_vector(sigs: list, pk_seed: int, pk_root: int, messages: list) -> List[int]:
+    """Serialize multiple signatures to Cairo-compatible format for MultiSigArgs."""
+    result = []
+
+    # === Public key (shared for all signatures) ===
+    result.append(pk_seed)   # felt252
+    result.append(pk_root)   # felt252
+
+    # === Number of signatures ===
+    result.append(len(sigs))
+
+    # === Each (signature, message) pair ===
+    for sig, (msg_u32, last_word, last_num_bytes) in zip(sigs, messages):
+        # Signature
+        result.append(sig['randomizer'])  # felt252
+
+        # FORS signature: 14 trees * (sk + 12 auth_path entries)
+        for sk, auth in sig['fors_sig']:
+            result.append(sk)      # felt252
+            result.extend(auth)    # 12 felt252 values
+
+        # WOTS Merkle signatures: 7 layers
+        for wots_sig in sig['wots_sigs']:
+            result.extend(wots_sig['chains'])     # 35 felt252 values
+            result.extend(wots_sig['auth_path'])  # 9 felt252 values
+
+        # Message as WordArray
+        result.extend(message_to_wordarray_felts(msg_u32, last_word, last_num_bytes))
+
+    return result
+
+
 def main():
     """Generate SPHINCS+ Poseidon test vectors."""
     parser = argparse.ArgumentParser(
@@ -771,7 +821,16 @@ def main():
         default=None,
         help='Output file (default: stdout)'
     )
+    parser.add_argument(
+        '--workers', '-w',
+        type=int,
+        default=None,
+        help='Number of parallel workers (default: cpu_count for multi-sig, 1 for single)'
+    )
     args = parser.parse_args()
+
+    if args.workers is None:
+        args.workers = os.cpu_count() if args.num_signatures > 1 else 1
 
     print("=== SPHINCS+ Poseidon Test Vector Generator ===", file=sys.stderr)
     print(f"Parameters: h={SPX_FULL_HEIGHT}, d={SPX_D}, k={SPX_FORS_TREES}, a={SPX_FORS_HEIGHT}, w={SPX_WOTS_W}", file=sys.stderr)
@@ -786,8 +845,7 @@ def main():
     # Create signer
     signer = SphincsPoseidonSigner(sk_seed, pk_seed)
 
-    # Generate signatures
-    sigs = []
+    # Prepare messages
     messages = []
     for i in range(args.num_signatures):
         # Convert message string to u32 words for WordArray representation.
@@ -812,20 +870,38 @@ def main():
 
         messages.append((message_u32, last_word, last_num_bytes))
 
-        print(f"\nSigning message {i+1}/{args.num_signatures}: {message_str}", file=sys.stderr)
-        sig = signer.sign(message_u32, last_word, last_num_bytes)
-        sigs.append(sig)
+    # Generate signatures
+    if args.workers <= 1 or args.num_signatures == 1:
+        # Sequential (preserves progress output)
+        sigs = []
+        for i, (msg_u32, last_word, last_num_bytes) in enumerate(messages):
+            print(f"\nSigning message {i+1}/{args.num_signatures}: {args.message_prefix}{i}", file=sys.stderr)
+            sig = signer.sign(msg_u32, last_word, last_num_bytes)
+            sigs.append(sig)
+    else:
+        # Parallel
+        print(f"\nSigning {args.num_signatures} messages using {args.workers} workers...", file=sys.stderr)
+        sigs = [None] * args.num_signatures
+        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(
+                    _sign_worker, sk_seed, pk_seed, signer.pk_root,
+                    msg_u32, last_word, last_num_bytes, i
+                ): i
+                for i, (msg_u32, last_word, last_num_bytes) in enumerate(messages)
+            }
+            for future in as_completed(futures):
+                idx, sig = future.result()
+                sigs[idx] = sig
+                print(f"  Completed signature {idx+1}/{args.num_signatures}", file=sys.stderr)
 
-    # Serialize (single signature for now)
-    msg_u32, msg_last_word, msg_last_num_bytes = messages[0]
+    # Serialize
     if args.num_signatures == 1:
+        msg_u32, msg_last_word, msg_last_num_bytes = messages[0]
         result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
                                        msg_u32, msg_last_word, msg_last_num_bytes)
     else:
-        # For now, only output first signature (can extend to multi-sig later)
-        print("\nWarning: Multi-signature format not yet implemented, outputting first signature only", file=sys.stderr)
-        result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
-                                       msg_u32, msg_last_word, msg_last_num_bytes)
+        result = serialize_multi_sig_vector(sigs, pk_seed, signer.pk_root, messages)
 
     print(f"\nTotal elements: {len(result)}", file=sys.stderr)
     print(f"Signature(s) generated successfully!", file=sys.stderr)

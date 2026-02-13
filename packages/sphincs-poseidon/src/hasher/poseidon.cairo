@@ -61,7 +61,7 @@ pub fn hash_update_block(ref state: HashState, mut data: Span<felt252>) {
         hash_update_16(ref state, chunk.unbox());
     }
 
-    while let Some(word) = data.pop_front() {
+    for word in data {
         state.state = state.state.update(*word);
     }
 }

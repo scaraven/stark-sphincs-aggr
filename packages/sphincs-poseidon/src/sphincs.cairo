@@ -145,16 +145,14 @@ pub fn verify_128s_batch(
     let ctx = initialize_hash_function(pk.pk_seed);
 
     let mut iter = sig_msg_pairs;
-    let mut all_valid = true;
 
     for (sig, message) in iter {
         let valid = verify_128s_with_ctx(ctx, message.span(), *sig, pk);
         if !valid {
-            all_valid = false;
+            return false;
         }
     }
-
-    all_valid
+    true
 }
 
 /// Split the extended message digest into the message hash, tree address and leaf index.

@@ -2,14 +2,34 @@
 version = 1
 
 [[package]]
+name = "corelib_imports"
+version = "0.1.2"
+source = "git+https://github.com/keep-starknet-strange/garaga.git?tag=v1.0.1#aa91b6504c86995789edb4e78f9f9ba20571625c"
+
+[[package]]
 name = "falcon"
 version = "0.1.0"
+
+[[package]]
+name = "garaga"
+version = "1.0.1"
+source = "git+https://github.com/keep-starknet-strange/garaga.git?tag=v1.0.1#aa91b6504c86995789edb4e78f9f9ba20571625c"
+dependencies = [
+ "corelib_imports",
+]
 
 [[package]]
 name = "oracle"
 version = "0.1.0-dev.4"
 source = "registry+https://scarbs.xyz/"
 checksum = "sha256:f7f8e649a21f98dbc28dbe3575016382bc1c8a28ddf0bfd6ff4cbed66c3c5fb1"
+
+[[package]]
+name = "schnorr_btc"
+version = "0.1.0"
+dependencies = [
+ "garaga",
+]
 
 [[package]]
 name = "sphincs_btc"

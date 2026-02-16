@@ -222,3 +222,70 @@ pub fn is_valid_schnorr_signature_assuming_hash(
 
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{u256_to_u32_be_words, hash_challenge};
+
+    // ========== u256_to_u32_be_words tests ==========
+
+    #[test]
+    fn test_u256_to_u32_be_words_zero() {
+        let result = u256_to_u32_be_words(0);
+        assert_eq!(result, [0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_u256_to_u32_be_words_max() {
+        let max: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+        let result = u256_to_u32_be_words(max);
+        assert_eq!(
+            result,
+            [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF],
+        );
+    }
+
+    #[test]
+    fn test_u256_to_u32_be_words_bip340_vector0_pk() {
+        // BIP-340 test vector 0 public key x-coordinate
+        let px: u256 = 0xF9308A019288C31049344F85F89D5229B531C845836F99B08601F113BCE036F9;
+        let result = u256_to_u32_be_words(px);
+        assert_eq!(
+            result,
+            [0xf9308a01, 0x9288c310, 0x49344f85, 0xf89d5229, 0xb531c845, 0x836f99b0, 0x8601f113, 0xbce036f9],
+        );
+    }
+
+    // ========== hash_challenge tests ==========
+
+    #[test]
+    fn test_hash_challenge_bip340_vector_0() {
+        // BIP-340 test vector 0: 32 zero bytes message
+        // rx from signature, px from public key
+        let rx: u256 = 0xE907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215;
+        let px: u256 = 0xF9308A019288C31049344F85F89D5229B531C845836F99B08601F113BCE036F9;
+        // Message: 32 zero bytes = 8 u32 words of zero
+        let message = array![0_u32, 0_u32, 0_u32, 0_u32, 0_u32, 0_u32, 0_u32, 0_u32];
+
+        let e = hash_challenge(rx, px, message, 0, 0);
+
+        // Expected value computed from Python BIP-340 reference
+        let expected: u256 = 0x30cabe30d431104e2eec36a1b4b2ed3d6eeca96c261a9e3c8b864382e46d2d68;
+        assert_eq!(e, expected);
+    }
+
+    #[test]
+    fn test_hash_challenge_empty_message() {
+        // BIP-340 test vector 15: empty message
+        let rx: u256 = 0x71535DB165ECD9FBBC046E5FFAEA61186BB6AD436732FCCC25291A55895464CF;
+        let px: u256 = 0x778CAA53B4393AC467774D09497A87224BF9FAB6F6E68B23086497324D6FD117;
+        // Empty message
+        let message: Array<u32> = array![];
+
+        let e = hash_challenge(rx, px, message, 0, 0);
+
+        // Expected value computed from Python BIP-340 reference
+        let expected: u256 = 0xd3561670cd8b50b077cd4e229a6e1c09a1a663ad08264632a8596194b9e0abc7;
+        assert_eq!(e, expected);
+    }
+}

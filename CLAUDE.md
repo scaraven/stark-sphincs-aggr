@@ -11,6 +11,7 @@ This repository implements STARK-provable verification of post-quantum signature
 - **sphincs-plus**: Standard NIST SPHINCS+ 128s parameter set
 - **sphincs-poseidon**: SPHINCS+ with Poseidon hash (arithmetic-friendly)
 - **falcon**: Falcon-512 (lattice-based, NIST finalist)
+- **schnorr-btc**: BIP-340 Schnorr signature verification using Garaga EC operations
 
 ## Development Commands
 
@@ -25,6 +26,7 @@ scarb build --package sphincs_btc
 scarb build --package sphincs_plus
 scarb build --package sphincs_poseidon
 scarb build --package falcon
+scarb build --package schnorr_btc
 ```
 
 ### Testing
@@ -62,6 +64,10 @@ python generate_args.py
 
 # falcon
 cd packages/falcon/scripts
+python generate_args.py
+
+# schnorr-btc
+cd packages/schnorr-btc/scripts
 python generate_args.py
 ```
 
@@ -106,6 +112,7 @@ The repository uses a Scarb workspace with four main packages under `packages/`:
 - **sphincs-plus**: Standard SPHINCS+ 128s implementation
 - **sphincs-poseidon**: Poseidon hash backend for SPHINCS+ (experimental)
 - **falcon**: Falcon-512 implementation (NTT-based lattice signatures)
+- **schnorr-btc**: BIP-340 Schnorr verification using Garaga's circuit-based EC operations
 
 ### Hash Function Abstraction
 
@@ -283,6 +290,44 @@ Currently calls `verify_128s` per signature independently — no shared computat
 - `src/sphincs.cairo`: verify_128s, verify_128s_batch, split_xdigest_128s
 - `src/address/dense.cairo`: Address struct (12 fields: 6 words + 6 cached), into_field_components -> [felt252; 6]
 - `src/address/sparse.cairo`: Address struct (8 fields), into_field_components -> [felt252; 8] (only used with `sparse_addr` feature, which is NOT default)
+
+## schnorr-btc Deep Dive
+
+### Overview
+
+BIP-340 Schnorr signature verification using Garaga's circuit-based EC operations (MSM). Enables standalone Stwo proving via `#[executable]` mode without Starknet syscalls.
+
+### Verification Flow
+
+1. Deserialize `Args`: pk (G1Point), sig (SchnorrSignatureWithHintInternal), message
+2. Extract `rx` and `px` as u256 from u384 representations
+3. BIP-340 bound checks: px < p, rx < p
+4. Recompute challenge: `e = SHA256(tag || tag || rx || px || msg) mod n` (input `e` is untrusted)
+5. Rebuild signature with computed `e`, delegate to `is_valid_schnorr_signature_assuming_hash`
+6. Garaga MSM verifies: `s*G - e*P = R` where `R.x == rx` and `R.y` is even
+
+### Serde Format (garaga-compatible)
+
+The `SchnorrSignatureInternal` has a custom Serde impl matching garaga's layout:
+- `rx`: u384 = 4 felt252 limbs (96-bit, little-endian limb order)
+- `s`: u256 = 2 felt252 (low_128, high_128)
+- `e`: u256 = 2 felt252 (low_128, high_128)
+
+`SchnorrSignatureWithHintInternal` derives Serde: signature(8 felts) + msm_hint(Array\<felt252\>, length-prefixed).
+
+### Key Source Files (schnorr-btc)
+
+- `src/schnorr.cairo`: verify(), is_valid_schnorr_signature_assuming_hash(), hash_challenge(), Internal structs with custom Serde
+- `src/sha256.cairo`: SHA-256 implementation for BIP-340 tagged hashing
+- `src/lib.cairo`: Args struct, main/main_multi executables
+- `scripts/generate_args.py`: BIP-340 signer with garaga MSM hint generation
+
+### Python generate_args.py
+
+- Uses `garaga.starknet.tests_and_calldata_generators.signatures.SchnorrSignature` for MSM hint generation
+- `serialize_with_hints(pk, prepend_public_key=False)` returns: rx(4) + s(2) + e(2) + msm_hint_len + msm_hint(...)
+- Script serializes: pk(8) + sig(8 + msm_hint) + message(len + words) + last_word + last_word_len
+- Supports single (`main`) and multi (`main_multi`) modes via `--multi` flag
 
 ## Known Constraints
 

@@ -14,6 +14,22 @@ const TWO_POW_32: u128 = 0x100000000;
 const TWO_POW_64: u128 = 0x10000000000000000;
 const TWO_POW_96: u128 = 0x1000000000000000000000000;
 
+/// Converts a u256 to 8 big-endian u32 words.
+#[inline(always)]
+fn u256_to_u32_be_words(v: u256) -> [u32; 8] {
+    let h = v.high;
+    let l = v.low;
+    let w0: u32 = (h / TWO_POW_96).try_into().unwrap();
+    let w1: u32 = ((h / TWO_POW_64) % TWO_POW_32).try_into().unwrap();
+    let w2: u32 = ((h / TWO_POW_32) % TWO_POW_32).try_into().unwrap();
+    let w3: u32 = (h % TWO_POW_32).try_into().unwrap();
+    let w4: u32 = (l / TWO_POW_96).try_into().unwrap();
+    let w5: u32 = ((l / TWO_POW_64) % TWO_POW_32).try_into().unwrap();
+    let w6: u32 = ((l / TWO_POW_32) % TWO_POW_32).try_into().unwrap();
+    let w7: u32 = (l % TWO_POW_32).try_into().unwrap();
+    [w0, w1, w2, w3, w4, w5, w6, w7]
+}
+
 /// secp256k1 field prime.
 const SECP256K1_P: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
 
@@ -47,30 +63,39 @@ struct SchnorrSignatureWithHintInternal {
 /// #### Arguments:
 /// * `rx`: `u256` - The x-coordinate of the R point from the signature.
 /// * `px`: `u256` - The x-coordinate of the public key.
-/// * `m`: `ByteArray` - The message for which the signature is being verified.
+/// * `m`: `Array<u32>` - Full u32 words of the message (big-endian).
+/// * `m_last_word`: `u32` - Last partial word (0 if aligned).
+/// * `m_last_word_len`: `u32` - Number of bytes in last word (0-3).
 ///
 /// #### Returns:
 /// * `u256` - `sha256(tag) || sha256(tag) || bytes(rx) || bytes(px) || m` as u256 where tag =
 /// "BIP0340/challenge".
-fn hash_challenge(rx: u256, px: u256, m: ByteArray) -> u256 {
-    // Precomputed sha256("BIP0340/challenge") || sha256("BIP0340/challenge")
-    let mut ba: ByteArray = Default::default();
-    // let ba = arr!
-    ba.append_word(0x7bb52d7a9fef58323eb1bf7a407db382d2f3f2d81bb1224f49fe518f6d48d3, 31);
-    ba.append_word(0x7c7bb52d7a9fef58323eb1bf7a407db382d2f3f2d81bb1224f49fe518f6d48, 31);
-    ba.append_word(0xd37c, 2);
-    // bytes(rx)
-    ba.append_word(rx.high.into(), 16);
-    ba.append_word(rx.low.into(), 16);
-    // bytes(px)
-    ba.append_word(px.high.into(), 16);
-    ba.append_word(px.low.into(), 16);
-    // m
-    ba.append(@m);
-
+fn hash_challenge(
+    rx: u256, px: u256, m: Array<u32>, m_last_word: u32, m_last_word_len: u32,
+) -> u256 {
     let mut hasher: sha256::HashState = Default::default();
     sha256::hash_init(ref hasher);
-    let [x0, x1, x2, x3, x4, x5, x6, x7] = sha256::hash_finalize(hasher, ba);
+
+    // Block 1: BIP0340/challenge tag (sha256("BIP0340/challenge") doubled = 16 words)
+    // Precomputed: sha256("BIP0340/challenge") = 7bb52d7a 9fef5832 3eb1bf7a 407db382 d2f3f2d8 1bb1224f 49fe518f 6d48d37c
+    sha256::hash_update_block(
+        ref hasher,
+        [
+            0x7bb52d7a, 0x9fef5832, 0x3eb1bf7a, 0x407db382, 0xd2f3f2d8, 0x1bb1224f, 0x49fe518f,
+            0x6d48d37c, 0x7bb52d7a, 0x9fef5832, 0x3eb1bf7a, 0x407db382, 0xd2f3f2d8, 0x1bb1224f,
+            0x49fe518f, 0x6d48d37c,
+        ],
+    );
+
+    // Block 2: rx (8 words) + px (8 words)
+    let [r0, r1, r2, r3, r4, r5, r6, r7] = u256_to_u32_be_words(rx);
+    let [p0, p1, p2, p3, p4, p5, p6, p7] = u256_to_u32_be_words(px);
+    sha256::hash_update_block(
+        ref hasher, [r0, r1, r2, r3, r4, r5, r6, r7, p0, p1, p2, p3, p4, p5, p6, p7],
+    );
+
+    // Finalize with message
+    let [x0, x1, x2, x3, x4, x5, x6, x7] = sha256::hash_finalize(hasher, m, m_last_word, m_last_word_len);
 
     let high: u128 = x0.into() * TWO_POW_96 + x1.into() * TWO_POW_64 + x2.into() * TWO_POW_32
         + x3.into();
@@ -82,17 +107,27 @@ fn hash_challenge(rx: u256, px: u256, m: ByteArray) -> u256 {
 /// Verifies a BIP-340 Schnorr signature using Garaga's EC operations.
 ///
 /// #### Arguments
-/// * `pk`: `u256` - The public key point x coordinate.
+/// * `pk`: `G1Point` - The public key point.
 /// * `rx`: `u256` - The x-coordinate of the R point from the signature.
 /// * `s`: `u256` - The scalar component of the signature.
-/// * `m`: `ByteArray` - The message for which the signature is being verified.
+/// * `m`: `Array<u32>` - Full u32 words of the message (big-endian).
+/// * `m_last_word`: `u32` - Last partial word (0 if aligned).
+/// * `m_last_word_len`: `u32` - Number of bytes in last word (0-3).
 /// * `msm_hint`: `Span<felt252>` - Precomputed hint data for Garaga's msm_g1.
 ///
 /// #### Returns
 /// * `bool` - `true` if the signature is valid, `false` otherwise.
-pub fn verify(pk: G1Point, rx: u256, s: u256, m: ByteArray, msm_hint: Span<felt252>) -> bool {
+pub fn verify(
+    pk: G1Point,
+    rx: u256,
+    s: u256,
+    m: Array<u32>,
+    m_last_word: u32,
+    m_last_word_len: u32,
+    msm_hint: Span<felt252>,
+) -> bool {
     let px = into_u256_unchecked(pk.x);
-    
+
     // BIP-340 bound checks
     if px >= SECP256K1_P || rx >= SECP256K1_P {
         return false;
@@ -100,7 +135,7 @@ pub fn verify(pk: G1Point, rx: u256, s: u256, m: ByteArray, msm_hint: Span<felt2
 
     // e = int(hash_BIP0340/challenge(bytes(rx) || bytes(px) || m)) mod n
     let n: u256 = get_n(SECP256K1_INDEX);
-    let e = hash_challenge(rx, px, m) % n;
+    let e = hash_challenge(rx, px, m, m_last_word, m_last_word_len) % n;
 
     // Build garaga SchnorrSignatureWithHint and delegate verification.
     // Garaga checks: s, e are in [1, n-1], pk is on curve with even y,

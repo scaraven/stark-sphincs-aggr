@@ -41,6 +41,12 @@ scarb test --package sphincs_poseidon
 scarb test -v
 ```
 
+
+### Troubleshooting scarb
+
+Note that sometimes scarb may not build properly, this is due to my WiFi occasionally preventing connections to certain
+domains which do not allow me to download packages for scarb. If you notice that a command hangs or if I explicitly tell you to, you should use proxychains before each scarb command.
+
 ### Generating Test Vectors
 
 Python scripts generate test vectors for signature verification. Each package has its own script:

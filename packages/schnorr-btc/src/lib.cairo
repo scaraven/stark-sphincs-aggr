@@ -11,24 +11,28 @@ pub struct Args {
     pub rx: u256,
     /// BIP-340 signature s.
     pub s: u256,
-    /// Message.
-    pub message: ByteArray,
+    /// Message as array of full u32 words (big-endian).
+    pub message: Array<u32>,
+    /// Last partial word of the message (0 if message is word-aligned).
+    pub message_last_word: u32,
+    /// Number of bytes in the last partial word (0-3).
+    pub message_last_word_len: u32,
     /// Precomputed MSM hint for Garaga's EC operations.
     pub msm_hint: Array<felt252>,
 }
 
 #[executable]
 fn main(args: Args) {
-    let Args { pk, rx, s, message, msm_hint } = args;
-    let res = schnorr::verify(pk, rx, s, message, msm_hint.span());
+    let Args { pk, rx, s, message, message_last_word, message_last_word_len, msm_hint } = args;
+    let res = schnorr::verify(pk, rx, s, message, message_last_word, message_last_word_len, msm_hint.span());
     check_result(res);
 }
 
 #[executable]
 fn main_multi(args: Array<Args>) {
     for arg in args {
-        let Args { pk, rx, s, message, msm_hint } = arg;
-        let res = schnorr::verify(pk, rx, s, message, msm_hint.span());
+        let Args { pk, rx, s, message, message_last_word, message_last_word_len, msm_hint } = arg;
+        let res = schnorr::verify(pk, rx, s, message, message_last_word, message_last_word_len, msm_hint.span());
         check_result(res);
     }
 }

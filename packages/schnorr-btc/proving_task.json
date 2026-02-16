@@ -1,0 +1,11 @@
+{
+    "single_page": true,
+    "tasks": [
+        {
+            "type": "Cairo1Executable",
+            "path": "target/release/schnorr_btc_main.executable.json",
+            "program_hash_function": "blake",
+            "user_args_file": "packages/schnorr-btc/args.json"
+        }
+    ]
+}

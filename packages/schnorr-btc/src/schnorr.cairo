@@ -37,16 +37,33 @@ const SECP256K1_P: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 const SECP256K1_INDEX: usize = 2;
 
 #[derive(Drop, Debug, PartialEq)]
-struct SchnorrSignatureInternal {
+pub struct SchnorrSignatureInternal {
     pub rx: u384,
     pub s: u256,
     pub e: u256,
 }
 
-#[derive(Drop, PartialEq)]
-struct SchnorrSignatureWithHintInternal {
-    signature: SchnorrSignatureInternal,
-    msm_hint: Span<felt252>,
+impl SerdeSchnorrSignatureInternal of Serde<SchnorrSignatureInternal> {
+    fn serialize(self: @SchnorrSignatureInternal, ref output: Array<felt252>) {
+        // rx: u384 → 4 felt252 limbs (limb0, limb1, limb2, limb3)
+        Serde::<u384>::serialize(self.rx, ref output);
+        // s: u256 → (low, high)
+        Serde::<u256>::serialize(self.s, ref output);
+        // e: u256 → (low, high)
+        Serde::<u256>::serialize(self.e, ref output);
+    }
+    fn deserialize(ref serialized: Span<felt252>) -> Option<SchnorrSignatureInternal> {
+        let rx = Serde::<u384>::deserialize(ref serialized)?;
+        let s = Serde::<u256>::deserialize(ref serialized)?;
+        let e = Serde::<u256>::deserialize(ref serialized)?;
+        Option::Some(SchnorrSignatureInternal { rx, s, e })
+    }
+}
+
+#[derive(Drop, Serde, PartialEq)]
+pub struct SchnorrSignatureWithHintInternal {
+    pub signature: SchnorrSignatureInternal,
+    pub msm_hint: Array<felt252>,
 }
 
 /// Computes BIP0340/challenge tagged hash.
@@ -108,25 +125,22 @@ fn hash_challenge(
 ///
 /// #### Arguments
 /// * `pk`: `G1Point` - The public key point.
-/// * `rx`: `u256` - The x-coordinate of the R point from the signature.
-/// * `s`: `u256` - The scalar component of the signature.
+/// * `sig`: `SchnorrSignatureWithHintInternal` - Signature with MSM hint (e is ignored, recomputed).
 /// * `m`: `Array<u32>` - Full u32 words of the message (big-endian).
 /// * `m_last_word`: `u32` - Last partial word (0 if aligned).
 /// * `m_last_word_len`: `u32` - Number of bytes in last word (0-3).
-/// * `msm_hint`: `Span<felt252>` - Precomputed hint data for Garaga's msm_g1.
 ///
 /// #### Returns
 /// * `bool` - `true` if the signature is valid, `false` otherwise.
 pub fn verify(
     pk: G1Point,
-    rx: u256,
-    s: u256,
+    sig: SchnorrSignatureWithHintInternal,
     m: Array<u32>,
     m_last_word: u32,
     m_last_word_len: u32,
-    msm_hint: Span<felt252>,
 ) -> bool {
     let px = into_u256_unchecked(pk.x);
+    let rx: u256 = into_u256_unchecked(sig.signature.rx);
 
     // BIP-340 bound checks
     if px >= SECP256K1_P || rx >= SECP256K1_P {
@@ -137,15 +151,13 @@ pub fn verify(
     let n: u256 = get_n(SECP256K1_INDEX);
     let e = hash_challenge(rx, px, m, m_last_word, m_last_word_len) % n;
 
-    // Build garaga SchnorrSignatureWithHint and delegate verification.
-    // Garaga checks: s, e are in [1, n-1], pk is on curve with even y,
-    // computes R = s*G - e*P, and verifies R.x == rx with even R.y.
+    // Rebuild signature with our computed e (don't trust input e)
+    let rebuilt_sig = SchnorrSignatureWithHintInternal {
+        signature: SchnorrSignatureInternal { rx: sig.signature.rx, s: sig.signature.s, e },
+        msm_hint: sig.msm_hint,
+    };
 
-    let rx: u384 = rx.into();
-    let signature = SchnorrSignatureInternal { rx, s, e };
-    let sig_with_hint = SchnorrSignatureWithHintInternal { signature, msm_hint };
-
-    is_valid_schnorr_signature_assuming_hash(sig_with_hint, pk, SECP256K1_INDEX)
+    is_valid_schnorr_signature_assuming_hash(rebuilt_sig, pk, SECP256K1_INDEX)
 }
 
 /// Verifies a Schnorr signature with associated hints, assuming the hash challenge is correct.
@@ -185,6 +197,7 @@ pub fn is_valid_schnorr_signature_assuming_hash(
     signature: SchnorrSignatureWithHintInternal, public_key: G1Point, curve_id: usize,
 ) -> bool {
     let SchnorrSignatureWithHintInternal { signature, msm_hint } = signature;
+    let msm_hint = msm_hint.span();
     let SchnorrSignatureInternal { rx, s, e } = signature;
 
     let n: u256 = get_n(curve_id);

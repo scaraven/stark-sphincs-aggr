@@ -121,7 +121,7 @@ pub fn fors_c_pk_from_sig(
 ) -> HashOutput {
     let ForsCSignature { full_sigs, compressed_sig } = sig;
 
-    let mut fors_tree_addr = address.clone();
+    let mut fors_tree_addr = *address;
     fors_tree_addr.set_address_type(AddressType::FORSTREE);
 
     // Compute indices from message hash
@@ -169,7 +169,7 @@ pub fn fors_c_pk_from_sig(
     roots.append_span(root.span());
 
     // Hash horizontally across all tree roots
-    let mut fors_pk_addr = address.clone();
+    let mut fors_pk_addr = *address;
     fors_pk_addr.set_address_type(AddressType::FORSPK);
 
     thash_btc(ctx, @fors_pk_addr, roots.span())
@@ -219,7 +219,7 @@ fn compute_root_index_zero(
     // This will be fixed when we have proper test vectors
 
     let mut node = leaf;
-    let mut address = address.clone();
+    let mut address = *address;
     let mut offset = idx_offset;
 
     // Compute up the tree assuming we're at index 0

@@ -24,6 +24,7 @@ class MultiSigBenchmarkRunner:
     EXECUTABLE_NAMES = {
         "sphincs-btc": "main_multi",
         "sphincs-poseidon": "poseidon_multi",
+        "schnorr-btc": "schnorr_btc_multi",
     }
 
     def __init__(self, workspace_root: Path, package: str = "sphincs-btc"):

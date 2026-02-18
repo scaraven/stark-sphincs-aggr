@@ -5,7 +5,7 @@
             "type": "Cairo1Executable",
             "path": "target/release/schnorr_btc_multi.executable.json",
             "program_hash_function": "blake",
-            "user_args_file": "packages/schnorr-btc/args.json"
+            "user_args_file": "benchmarks/results/temp_args/schnorr_args.json"
         }
     ]
 }

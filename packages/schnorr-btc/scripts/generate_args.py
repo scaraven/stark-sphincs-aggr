@@ -184,14 +184,16 @@ def generate_multi_args(privkeys: list[int], messages: list[bytes]) -> list[int]
 def main():
     parser = argparse.ArgumentParser(description="Generate Schnorr BIP-340 test vectors")
     parser.add_argument("-n", "--num-signatures", type=int, default=1, help="Number of signatures")
-    parser.add_argument("--seed", type=int, default=42, help="RNG seed")
-    parser.add_argument("-o", "--output", type=str, default=None, help="Output file (default: ../args.json)")
-    parser.add_argument("--multi", action="store_true", help="Use main_multi format (Array<Args>)")
+    parser.add_argument("--seed", type=int, default=0, help="RNG seed for deterministic generation (default: 0)")
+    parser.add_argument("-o", "--output", type=str, default=None, help="Output file (default: stdout)")
+    parser.add_argument("--message-prefix", default="test", help='Prefix for generated messages (default: "test")')
     args = parser.parse_args()
 
+    print("=== Schnorr BIP-340 Test Vector Generator ===", file=sys.stderr)
+    print(f"Number of signatures: {args.num_signatures}", file=sys.stderr)
+    print(f"RNG seed: {args.seed}", file=sys.stderr)
+
     # Deterministic key generation from seed
-    rng = secrets.SystemRandom()
-    # Use hashlib for deterministic derivation
     privkeys = []
     messages = []
     for i in range(args.num_signatures):
@@ -199,10 +201,10 @@ def main():
         privkey = int.from_bytes(seed_bytes, "big") % (N - 1) + 1
         privkeys.append(privkey)
 
-        msg = f"test message {i}".encode()
+        msg = f"{args.message_prefix} message {i}".encode()
         messages.append(msg)
 
-    if args.num_signatures == 1 and not args.multi:
+    if args.num_signatures == 1:
         result = generate_single_args(privkeys[0], messages[0])
     else:
         result = generate_multi_args(privkeys, messages)
@@ -210,11 +212,16 @@ def main():
     # Convert to hex strings
     hex_result = [hex(v) for v in result]
 
-    output_path = args.output or os.path.join(os.path.dirname(__file__), "..", "args.json")
-    with open(output_path, "w") as f:
-        json.dump(hex_result, f, indent=2)
+    output_data = json.dumps(hex_result)
 
-    print(f"Generated {args.num_signatures} signature(s) -> {output_path}", file=sys.stderr)
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(output_data)
+        print(f"Written to {args.output}", file=sys.stderr)
+    else:
+        print(output_data)
+
+    print(f"Generated {args.num_signatures} signature(s) successfully!", file=sys.stderr)
 
 
 if __name__ == "__main__":

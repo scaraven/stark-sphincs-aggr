@@ -1,0 +1,14 @@
+[package]
+name = "sphincs_core"
+version = "0.1.0"
+edition = "2024_07"
+
+[lib]
+
+[dev-dependencies]
+cairo_test = "2.11.4"
+
+[features]
+default = []
+debug = []
+sparse_addr = []

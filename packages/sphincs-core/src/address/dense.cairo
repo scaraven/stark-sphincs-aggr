@@ -28,7 +28,7 @@ use super::AddressType;
 #[derive(Drop, Default, Debug, Copy)]
 pub struct Address {
     w0: u32, // layer, hypertree address
-    w1: u32, // hypertree address 
+    w1: u32, // hypertree address
     w2: u32, // hypertree address, address type
     w3: u32, // keypair high/low bytes
     w4: u32, // tree height | wots chain address
@@ -125,6 +125,13 @@ pub impl AddressImpl of AddressTrait {
 
     fn into_components(self: Address) -> (u32, u32, u32, u32, u32, u32, u32, u32) {
         (self.w0, self.w1, self.w2, self.w3, self.w4, self.w5, 0, 0)
+    }
+
+    fn into_field_components(self: Address) -> [felt252; 6] {
+        [
+            self.w0.into(), self.w1.into(), self.w2.into(), self.w3.into(), self.w4.into(),
+            self.w5.into(),
+        ]
     }
 }
 

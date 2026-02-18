@@ -34,12 +34,20 @@ dependencies = [
 [[package]]
 name = "sphincs_btc"
 version = "0.1.0"
+dependencies = [
+ "sphincs_core",
+]
+
+[[package]]
+name = "sphincs_core"
+version = "0.1.0"
 
 [[package]]
 name = "sphincs_plus"
 version = "0.1.0"
 dependencies = [
  "oracle",
+ "sphincs_core",
 ]
 
 [[package]]
@@ -47,4 +55,5 @@ name = "sphincs_poseidon"
 version = "0.1.0"
 dependencies = [
  "oracle",
+ "sphincs_core",
 ]

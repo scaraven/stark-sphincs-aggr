@@ -52,6 +52,25 @@ pub impl WordSpanImpl of WordSpanTrait {
     fn into_components(self: WordSpan) -> (Span<u32>, u32, u32) {
         (self.input, self.last_input_word, self.last_input_num_bytes)
     }
+
+    fn into_felt252(self: WordSpan) -> Array<felt252> {
+        let (input_span, last_word, last_num_bytes) = self.into_components();
+        let mut array: Array<felt252> = array![];
+
+        for word in input_span {
+            array.append((*word).into());
+        }
+
+        if last_num_bytes == 1 {
+            array.append((last_word * 0x1000000).into());
+        } else if last_num_bytes == 2 {
+            array.append((last_word * 0x10000).into());
+        } else if last_num_bytes == 3 {
+            array.append((last_word * 0x100).into());
+        }
+
+        array
+    }
 }
 
 #[generate_trait]
@@ -81,7 +100,6 @@ pub impl WordArrayImpl of WordArrayTrait {
 
     /// Append a 4-byte word in big-endian order.
     fn append_u32_be(ref self: WordArray, value: u32) {
-        // TODO: If last input is always 0, we can optimize this.
         if self.last_input_num_bytes == 0 {
             self.input.append(value)
         } else if self.last_input_num_bytes == 1 {
@@ -127,7 +145,6 @@ pub impl WordArrayImpl of WordArrayTrait {
     }
 }
 
-#[cfg(or(test, feature: "debug"))]
 pub mod hex {
     use core::traits::DivRem;
     use super::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
@@ -187,7 +204,6 @@ pub mod hex {
             hex_char - 87
         } else {
             panic!("Invalid hex character: {hex_char}");
-            0
         }
     }
 }

@@ -2,15 +2,15 @@
 //
 // SPDX-License-Identifier: MIT
 
-pub mod address;
+pub use sphincs_core::address;
+pub use sphincs_core::word_array;
+pub use sphincs_core::word_array::{WordArray, WordArrayTrait, WordSpan, WordSpanTrait};
 pub mod fors;
 pub mod hasher;
 pub mod params_128s;
 pub mod sphincs;
-pub mod word_array;
 pub mod wots;
 use crate::sphincs::{SphincsPublicKey, SphincsSignature};
-use crate::word_array::{WordArray, WordArrayTrait};
 
 #[derive(Drop, Serde, Default)]
 pub struct Args {

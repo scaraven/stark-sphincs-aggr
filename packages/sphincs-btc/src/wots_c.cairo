@@ -131,7 +131,7 @@ pub fn wots_c_pk_from_sig(
         let start: u8 = x_i.try_into().unwrap();
 
         // Set the hash address for this chain
-        let mut wots_addr = address.clone();
+        let mut wots_addr = *address;
         wots_addr.set_wots_chain_addr(chain_idx);
 
         // Hash chain from step x_i up to w-1 = 255
@@ -155,10 +155,7 @@ fn chain_hash_256(ctx: SpxCtx, input: HashOutput, start: u8, ref address: Addres
     let mut output = thash_btc(ctx, @address, input.span());
 
     let mut i = start + 1;
-    loop {
-        if i == 255 {
-            break;
-        }
+    while i < 255 {
         address.set_wots_hash_addr(i);
         output = thash_btc(ctx, @address, output.span());
         i += 1;

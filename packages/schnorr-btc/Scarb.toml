@@ -1,0 +1,25 @@
+[package]
+name = "schnorr_btc"
+version = "0.1.0"
+edition = "2024_07"
+
+[lib]
+
+[[target.executable]]
+name = "schnorr_btc_multi"
+function = "schnorr_btc::main_multi"
+
+[[target.executable]]
+name = "schnorr_btc_main"
+function = "schnorr_btc::main"
+
+[dependencies]
+cairo_execute = "2.11.4"
+garaga = { git = "https://github.com/keep-starknet-strange/garaga.git", tag = "v1.0.1" }
+
+[dev-dependencies]
+cairo_test = "2.11.4"
+
+[features]
+default = []
+debug = []

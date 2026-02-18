@@ -11,3 +11,5 @@ __pycache__/
 *.pyc
 .venv/
 
+### Pyenv virtual environments
+.python-version

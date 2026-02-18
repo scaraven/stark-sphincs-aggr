@@ -95,11 +95,11 @@ pub fn verify_btc(message: WordSpan, sig: SphincsSignature, pk: SphincsPublicKey
         tree_addr.set_hypertree_layer(layer);
         tree_addr.set_hypertree_addr(tree_address.into());
 
-        wots_addr = tree_addr.clone();
+        wots_addr = tree_addr;
         wots_addr.set_address_type(AddressType::WOTS);
         wots_addr.set_keypair(leaf_idx.into());
 
-        let mut wots_pk_addr = wots_addr.clone();
+        let mut wots_pk_addr = wots_addr;
         wots_pk_addr.set_address_type(AddressType::WOTSPK);
 
         debug_print_layer(layer, tree_address, leaf_idx, root, *wots_sig.counter);

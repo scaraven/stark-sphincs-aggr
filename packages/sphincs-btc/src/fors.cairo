@@ -80,7 +80,7 @@ fn message_to_indices_btc(mut mhash: WordSpan) -> Array<u32> {
 pub fn fors_pk_from_sig(
     ctx: SpxCtx, sig: ForsSignature, mhash: WordSpan, address: @Address,
 ) -> HashOutput {
-    let mut fors_tree_addr = address.clone();
+    let mut fors_tree_addr = *address;
     fors_tree_addr.set_address_type(AddressType::FORSTREE);
 
     // Compute indices from message hash
@@ -116,7 +116,7 @@ pub fn fors_pk_from_sig(
     }
 
     // Hash horizontally across all tree roots
-    let mut fors_pk_addr = address.clone();
+    let mut fors_pk_addr = *address;
     fors_pk_addr.set_address_type(AddressType::FORSPK);
 
     thash_btc(ctx, @fors_pk_addr, roots.span())

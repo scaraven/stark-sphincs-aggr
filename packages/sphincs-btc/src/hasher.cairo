@@ -109,7 +109,7 @@ pub fn compute_root(
 ) -> HashOutput {
     let mut node = leaf;
     let mut i = 0;
-    let mut address = address.clone();
+    let mut address = *address;
 
     while let Some(hash_witness) = auth_path.pop_front() {
         let (q, r) = DivRem::div_rem(leaf_idx, 2);

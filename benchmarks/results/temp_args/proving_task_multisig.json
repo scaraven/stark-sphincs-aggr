@@ -1,0 +1,1 @@
+{"single_page": true, "tasks": [{"type": "Cairo1Executable", "path": "/home/scaraven/Documents/stark-sphincs-aggr/target/release/schnorr_btc_multi.executable.json", "program_hash_function": "blake", "user_args_file": "/home/scaraven/Documents/stark-sphincs-aggr/benchmarks/results/temp_args/multisig_n10_seed0.json"}]}

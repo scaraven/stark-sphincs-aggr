@@ -104,6 +104,10 @@ Single signature verification with the Stwo prover:
 
 ```
 packages/
+├── sphincs-core/         # Shared library for all SPHINCS+ packages
+│   └── src/
+│       ├── address/         # Dense & sparse address encoding
+│       └── word_array.cairo # Word array utilities + hex helpers
 ├── sphincs-poseidon/     # SPHINCS+ with Poseidon hash
 │   ├── src/
 │   │   ├── sphincs.cairo    # Main verification logic
@@ -137,7 +141,7 @@ packages/
 
 ### Address Encoding
 
-The implementation uses a 22-byte dense address encoding optimized for Cairo's 32-bit word operations:
+The address encoding lives in `sphincs-core` and is shared by all SPHINCS+ packages. It uses a 22-byte dense format optimized for Cairo's 32-bit word operations:
 
 ```
 Bytes 0-7:    layer (1B) + tree_addr (7B)

@@ -106,11 +106,12 @@ python benchmarks/compare_results.py benchmarks/results/benchmark_*.json
 
 ### Package Structure
 
-The repository uses a Scarb workspace with four main packages under `packages/`:
+The repository uses a Scarb workspace with packages under `packages/`:
 
-- **sphincs-btc**: Bitcoin-optimized variant with WOTS+C (eliminates checksum chains via grinding)
-- **sphincs-plus**: Standard SPHINCS+ 128s implementation
-- **sphincs-poseidon**: Poseidon hash backend for SPHINCS+ (experimental)
+- **sphincs-core**: Shared library containing `address` (dense/sparse encoding) and `word_array` modules used by all SPHINCS+ packages. No executable targets — library only.
+- **sphincs-btc**: Bitcoin-optimized variant with WOTS+C (eliminates checksum chains via grinding). Depends on `sphincs-core`.
+- **sphincs-plus**: Standard SPHINCS+ 128s implementation. Depends on `sphincs-core`.
+- **sphincs-poseidon**: Poseidon hash backend for SPHINCS+ (experimental). Depends on `sphincs-core`.
 - **falcon**: Falcon-512 implementation (NTT-based lattice signatures)
 - **schnorr-btc**: BIP-340 Schnorr verification using Garaga's circuit-based EC operations
 
@@ -129,7 +130,7 @@ The SPHINCS+ implementations use conditional compilation to switch hash backends
 
 ### Address Encoding
 
-SPHINCS+ uses a tweakable hash function with an "address" parameter that provides domain separation. Two implementations:
+SPHINCS+ uses a tweakable hash function with an "address" parameter that provides domain separation. Two implementations live in `sphincs-core`:
 
 **Dense encoding** (default): 22-byte packed format optimized for Blake2s/SHA-256
 - Layout: layer(1) + tree_addr(7) + type(1) + pad(1) + keypair(2) + pad(2) + tree_height/chain_addr(1) + tree_index/hash_addr(3)
@@ -138,7 +139,7 @@ SPHINCS+ uses a tweakable hash function with an "address" parameter that provide
 **Sparse encoding** (feature-gated): Field-element encoding for Poseidon
 - Each field encodes logical components separately
 - `into_field_components()` returns `[felt252; 8]` for Poseidon absorption
-- Not used by anyone, this is an obselete feature
+- Not used by anyone, this is an obsolete feature
 
 ### SPHINCS+ Verification Flow
 
@@ -175,18 +176,24 @@ State is initialized with `pk_seed`, then address components and message are abs
 
 ### Scarb Features
 
+**sphincs-core**:
+- `sparse_addr`: Use sparse address encoding instead of dense (default: disabled)
+- `debug`: Enable debug output (exposes `hex` module unconditionally; without this, `hex` is always available as a library)
+
 **sphincs-btc**:
 - `blake_hash`: Use Blake2s instead of SHA-256 (default: enabled)
 - `debug`: Enable debug output
 
 **sphincs-poseidon**:
-- `sparse_addr`: Use sparse address encoding (required for Poseidon)
+- `sparse_addr`: Use sparse address encoding (obsolete, not enabled by default)
 
 Features are specified in `Scarb.toml` under `[features]`.
 
 ## Important Files
 
 - `prover_params.json`: Root-level STARK prover configuration (shared across packages)
+- `packages/sphincs-core/src/address/dense.cairo`: Shared dense address encoding (used by all SPHINCS+ packages)
+- `packages/sphincs-core/src/word_array.cairo`: Shared word array utilities (used by all SPHINCS+ packages)
 - `packages/*/proving_task.json`: Per-package proving task definitions
 - `packages/*/scripts/generate_args.py`: Python signers for test vector generation
 - `benchmarks/benchmark.py`: Benchmarking harness for proof generation
@@ -203,10 +210,11 @@ Check which hash backend is active:
 
 ### Working with Addresses
 
-The `Address` type and `AddressTrait` are abstracted:
+The `Address` type and `AddressTrait` live in `sphincs-core` and are re-exported by each SPHINCS+ package:
 - Dense: `address.to_word_array()` returns byte-packed representation
 - Sparse: `address.into_field_components()` returns field elements
 - Always use the trait methods, never assume internal structure
+- Import via `crate::address::{Address, AddressTrait}` — the re-export in each package's `lib.cairo` resolves to `sphincs_core::address`
 
 ### Testing Hash Functions
 
@@ -288,8 +296,12 @@ Currently calls `verify_128s` per signature independently — no shared computat
 - `src/wots.cairo`: wots_pk_from_sig, chain_hash_128s, base_w_128s, add_checksum_128s
 - `src/fors.cairo`: fors_pk_from_sig, message_to_indices_128s
 - `src/sphincs.cairo`: verify_128s, verify_128s_batch, split_xdigest_128s
+
+### Key Source Files (sphincs-core)
+
 - `src/address/dense.cairo`: Address struct (12 fields: 6 words + 6 cached), into_field_components -> [felt252; 6]
 - `src/address/sparse.cairo`: Address struct (8 fields), into_field_components -> [felt252; 8] (only used with `sparse_addr` feature, which is NOT default)
+- `src/word_array.cairo`: WordArray/WordSpan structs, hex utilities for test/debug
 
 ## schnorr-btc Deep Dive
 

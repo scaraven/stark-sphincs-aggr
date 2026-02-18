@@ -3,7 +3,7 @@
     "tasks": [
         {
             "type": "Cairo1Executable",
-            "path": "target/release/schnorr_btc_main.executable.json",
+            "path": "target/release/schnorr_btc_multi.executable.json",
             "program_hash_function": "blake",
             "user_args_file": "packages/schnorr-btc/args.json"
         }

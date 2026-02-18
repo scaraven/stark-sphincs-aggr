@@ -324,10 +324,17 @@ The `SchnorrSignatureInternal` has a custom Serde impl matching garaga's layout:
 
 ### Python generate_args.py
 
-- Uses `garaga.starknet.tests_and_calldata_generators.signatures.SchnorrSignature` for MSM hint generation
+- **Dependencies**: `coincurve` (libsecp256k1 bindings for EC point multiplication), `garaga` (MSM hint generation + serialization helpers)
+- **Imports**: `garaga.curves.CURVES, CurveID` (NOT `garaga.definitions`), `garaga.hints.io.split_128`, `garaga.starknet.tests_and_calldata_generators.signatures.SchnorrSignature`
 - `serialize_with_hints(pk, prepend_public_key=False)` returns: rx(4) + s(2) + e(2) + msm_hint_len + msm_hint(...)
-- Script serializes: pk(8) + sig(8 + msm_hint) + message(len + words) + last_word + last_word_len
+- Script serializes: pk(4 felts, u256×2) + sig(8 + msm_hint) + message(len + words) + last_word + last_word_len
+- **pk is u256×2 (4 felts total)**, NOT G1Point (which would be u384×2 = 8 felts). Matches `Args { px: u256, py: u256 }` in Cairo.
 - Supports single (`main`) and multi (`main_multi`) modes via `--multi` flag
+- **CLI**: `-n` for signature count, `--seed` for deterministic key derivation, `-o` for output path, `--multi` for Array\<Args\> format
+- **Key derivation is deterministic**: `SHA256("schnorr-btc-privkey-{seed}-{i}")` — same seed always produces same private keys. However, **signing uses random aux_rand** (`secrets.token_bytes(32)`), so signatures differ across runs even with the same seed.
+- **Message format**: messages are `"test message {i}".encode()` — variable length, serialized as big-endian u32 words with a remainder (last_word + last_word_len) for non-4-byte-aligned messages
+- **BIP-340 even-y convention**: Both public key P and nonce point R are forced to have even y-coordinates. If y is odd, negate the scalar (privkey or nonce k) modulo N, and negate y modulo P.
+- **Output format**: args.json contains hex strings (not ints), e.g. `["0x1a2b...", ...]`
 
 ## Known Constraints
 

@@ -7,7 +7,8 @@ use schnorr::SchnorrSignatureWithHintInternal;
 #[derive(Drop, Serde)]
 pub struct Args {
     /// BIP-340 public key (full point with even y-coordinate).
-    pub pk: G1Point,
+    pub px: u256,
+    pub py: u256,
     /// BIP-340 signature with MSM hint in garaga serialization format.
     pub sig: SchnorrSignatureWithHintInternal,
     /// Message as array of full u32 words (big-endian).
@@ -20,7 +21,8 @@ pub struct Args {
 
 #[executable]
 fn main(args: Args) {
-    let Args { pk, sig, message, message_last_word, message_last_word_len } = args;
+    let Args { px, py, sig, message, message_last_word, message_last_word_len } = args;
+    let pk = G1Point { x: px.into(), y: py.into() };
     let res = schnorr::verify(pk, sig, message, message_last_word, message_last_word_len);
     check_result(res);
 }
@@ -28,7 +30,8 @@ fn main(args: Args) {
 #[executable]
 fn main_multi(args: Array<Args>) {
     for arg in args {
-        let Args { pk, sig, message, message_last_word, message_last_word_len } = arg;
+        let Args { px, py, sig, message, message_last_word, message_last_word_len } = arg;
+        let pk = G1Point { x: px.into(), y: py.into() };
         let res = schnorr::verify(pk, sig, message, message_last_word, message_last_word_len);
         check_result(res);
     }

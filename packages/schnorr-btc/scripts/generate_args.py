@@ -14,8 +14,9 @@ import secrets
 import struct
 import sys
 
+from coincurve import PublicKey
 from garaga.curves import CURVES, CurveID
-from garaga.hints.io import bigint_split, split_128
+from garaga.hints.io import split_128
 from garaga.starknet.tests_and_calldata_generators.signatures import SchnorrSignature
 
 
@@ -53,19 +54,14 @@ def lift_x(x: int) -> tuple[int, int]:
 
 
 def point_mul(k: int, px: int, py: int) -> tuple[int, int]:
-    """Scalar multiplication on secp256k1 using double-and-add."""
-    # Use garaga's G1Point for this
-    pt = G1Point(px, py, CurveID.SECP256K1)
-    result = pt.scalar_mul(k)
-    return (result.x, result.y)
-
-
-def point_add(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
-    """Point addition on secp256k1."""
-    p1 = G1Point(x1, y1, CurveID.SECP256K1)
-    p2 = G1Point(x2, y2, CurveID.SECP256K1)
-    result = p1.add(p2)
-    return (result.x, result.y)
+    """Compute [k]P on secp256k1 using libsecp256k1 via coincurve."""
+    point_bytes = b'\x04' + px.to_bytes(32, 'big') + py.to_bytes(32, 'big')
+    pubkey = PublicKey(point_bytes)
+    result = pubkey.multiply(k.to_bytes(32, 'big'))
+    result_bytes = result.format(compressed=False)
+    rx = int.from_bytes(result_bytes[1:33], 'big')
+    ry = int.from_bytes(result_bytes[33:65], 'big')
+    return (rx, ry)
 
 
 def bip340_sign(privkey: int, message: bytes) -> dict:
@@ -118,23 +114,6 @@ def bip340_sign(privkey: int, message: bytes) -> dict:
     }
 
 
-def serialize_u384(value: int) -> list[int]:
-    """Serialize a u384 as 4 felt252 limbs (96-bit each, little-endian limb order)."""
-    limbs = bigint_split(value, 4, 2**96)
-    return list(limbs)
-
-
-def serialize_u256(value: int) -> list[int]:
-    """Serialize a u256 as (low_128, high_128)."""
-    low, high = split_128(value)
-    return [low, high]
-
-
-def serialize_g1point(x: int, y: int) -> list[int]:
-    """Serialize a G1Point as x(u384=4 limbs) + y(u384=4 limbs)."""
-    return serialize_u384(x) + serialize_u384(y)
-
-
 def serialize_message(msg_bytes: bytes) -> tuple[list[int], int, int]:
     """
     Split message bytes into big-endian u32 words.
@@ -158,33 +137,6 @@ def serialize_message(msg_bytes: bytes) -> tuple[list[int], int, int]:
 
     return words, last_word, last_word_len
 
-
-def generate_msm_hint(rx: int, s: int, e: int, px: int, py: int) -> list[int]:
-    """
-    Generate MSM hint using garaga's SchnorrSignature.
-
-    Returns the msm_hint as a list of felt252 values.
-    """
-    sig = SchnorrSignature(
-        rx=rx,
-        s=s,
-        e=e,
-        curve_id=CURVE_ID,
-    )
-    pk = G1Point(px, py, CURVE_ID)
-
-    # serialize_with_hints returns the full calldata including signature fields
-    # Format: rx(4) + s(2) + e(2) + msm_hint_len + msm_hint(...)
-    # When prepend_public_key=True: pk(8) + rx(4) + s(2) + e(2) + msm_hint_len + msm_hint(...)
-    calldata = sig.serialize_with_hints(pk, prepend_public_key=False)
-
-    # Skip the signature fields: rx(4 limbs) + s(2) + e(2) = 8 felts
-    # The rest is length-prefixed msm_hint
-    msm_hint_with_len = calldata[8:]
-
-    return msm_hint_with_len
-
-
 def generate_single_args(privkey: int, message: bytes) -> list[int]:
     """
     Generate a single Args serialization.
@@ -202,31 +154,22 @@ def generate_single_args(privkey: int, message: bytes) -> list[int]:
     sig_data = bip340_sign(privkey, message)
     rx, s, e = sig_data["rx"], sig_data["s"], sig_data["e"]
     px, py = sig_data["px"], sig_data["py"]
-
-    result = []
-
-    # 1. pk: G1Point
-    result.extend(serialize_g1point(px, py))
-
-    # 2. sig.signature: SchnorrSignatureInternal (rx, s, e)
-    result.extend(serialize_u384(rx))
-    result.extend(serialize_u256(s))
-    result.extend(serialize_u256(e))
-
-    # 3. sig.msm_hint: Array<felt252> (length-prefixed)
-    msm_hint = generate_msm_hint(rx, s, e, px, py)
-    result.extend(msm_hint)
+    results = []
+    results.extend(split_128(px))
+    results.extend(split_128(py))
+    sig = SchnorrSignature(rx=rx, s=s, e=e, px=px, py=py, curve_id=CURVE_ID)
+    results.extend(sig.serialize_with_hints(prepend_public_key=False))
 
     # 4. message: Array<u32>
     words, last_word, last_word_len = serialize_message(message)
-    result.append(len(words))
-    result.extend(words)
+    results.append(len(words))
+    results.extend(words)
 
     # 5. message_last_word + message_last_word_len
-    result.append(last_word)
-    result.append(last_word_len)
+    results.append(last_word)
+    results.append(last_word_len)
 
-    return result
+    return results
 
 
 def generate_multi_args(privkeys: list[int], messages: list[bytes]) -> list[int]:

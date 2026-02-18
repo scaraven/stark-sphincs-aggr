@@ -8,7 +8,7 @@ use garaga::core::circuit::into_u256_unchecked;
 use garaga::ec_ops::{G1PointTrait, msm_g1};
 use garaga::basic_field_ops::{is_even_u384, neg_mod_p};
 use garaga::utils::u384_eq_zero;
-use garaga::definitions::{Zero, get_curve_order_modulus, G1Point, get_n, get_G};
+use garaga::definitions::{Zero, get_curve_order_modulus, G1Point, get_n, get_G, serialize_u384, deserialize_u384};
 
 const TWO_POW_32: u128 = 0x100000000;
 const TWO_POW_64: u128 = 0x10000000000000000;
@@ -46,14 +46,14 @@ pub struct SchnorrSignatureInternal {
 impl SerdeSchnorrSignatureInternal of Serde<SchnorrSignatureInternal> {
     fn serialize(self: @SchnorrSignatureInternal, ref output: Array<felt252>) {
         // rx: u384 → 4 felt252 limbs (limb0, limb1, limb2, limb3)
-        Serde::<u384>::serialize(self.rx, ref output);
+        serialize_u384(self.rx, ref output);
         // s: u256 → (low, high)
         Serde::<u256>::serialize(self.s, ref output);
         // e: u256 → (low, high)
         Serde::<u256>::serialize(self.e, ref output);
     }
     fn deserialize(ref serialized: Span<felt252>) -> Option<SchnorrSignatureInternal> {
-        let rx = Serde::<u384>::deserialize(ref serialized)?;
+        let rx = deserialize_u384(ref serialized);
         let s = Serde::<u256>::deserialize(ref serialized)?;
         let e = Serde::<u256>::deserialize(ref serialized)?;
         Option::Some(SchnorrSignatureInternal { rx, s, e })
@@ -207,13 +207,13 @@ pub fn is_valid_schnorr_signature_assuming_hash(
         || s == 0
         || e >= n
         || e == 0
-        || is_even_u384(public_key.y) == false {
+        || !is_even_u384(public_key.y) {
         return false;
     }
 
     let pk_on_curve = public_key.is_on_curve_excluding_infinity(curve_id);
 
-    if pk_on_curve == false {
+    if !pk_on_curve {
         return false;
     }
 

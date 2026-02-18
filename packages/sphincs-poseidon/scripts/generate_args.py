@@ -41,6 +41,9 @@ SPX_WOTS_LEN1 = 8 * SPX_N // SPX_WOTS_LOGW  # 32
 SPX_WOTS_LEN2 = 3  # checksum length
 SPX_WOTS_LEN = SPX_WOTS_LEN1 + SPX_WOTS_LEN2  # 35
 
+# Number of bytes at the end we need to 
+SPX_OMIT_C = 2
+
 class Address:
     """
     Dense address encoding matching Cairo implementation.
@@ -270,6 +273,8 @@ def wots_sign(pk_seed: int, sk_seed: int, message_root: int, address: Address) -
 
     # Convert to base-w
     msg_base_w = base_w_128s(msg_u32)
+    sum_w = sum(msg_base_w)
+    print("Message base-w digits:", msg_base_w, "sum:", sum_w, file=sys.stderr)
 
     # Compute checksum
     checksum = compute_checksum(msg_base_w)

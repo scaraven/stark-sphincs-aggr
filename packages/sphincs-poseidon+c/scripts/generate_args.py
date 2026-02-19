@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Generate valid test vectors for SPHINCS+ with Poseidon hash.
+Generate valid test vectors for SPHINCS+ with Poseidon hash (WOTS+C variant).
 
 This implementation uses field elements (felt252) instead of bytes,
 matching the Cairo Poseidon implementation.
 
 Parameters (matching params_128s.cairo):
-- h=63 (total height)
-- d=7 (hypertree layers)
-- tree_height=9 (per subtree)
-- k=14 (FORS trees)
-- a=12 (FORS height)
+- h=33 (total height)
+- d=3 (hypertree layers)
+- tree_height=11 (per subtree)
+- k=9 (FORS trees)
+- a=15 (FORS height)
 - w=16 (WOTS parameter)
 - hash=Poseidon (arithmetic-friendly)
+- WOTS+C: grinding over counter to eliminate checksum chains
 """
 
 import os
@@ -25,21 +26,22 @@ import sys
 
 # === Parameters (matching params_128s.cairo) ===
 SPX_N = 16  # hash output bytes (for reference, but we use felt252)
-SPX_FULL_HEIGHT = 63
-SPX_D = 7
-SPX_TREE_HEIGHT = 9  # SPX_FULL_HEIGHT / SPX_D
-SPX_FORS_HEIGHT = 12
-SPX_FORS_TREES = 14
-SPX_FORS_BASE_OFFSET = 1 << SPX_FORS_HEIGHT  # 4096
-SPX_FORS_MSG_BYTES = (SPX_FORS_HEIGHT * SPX_FORS_TREES + 7) // 8  # 21
-SPX_TREE_BITS = SPX_TREE_HEIGHT * (SPX_D - 1)  # 54
-SPX_LEAF_BITS = SPX_TREE_HEIGHT  # 9
-SPX_DGST_BYTES = SPX_FORS_MSG_BYTES + (SPX_TREE_BITS + 7) // 8 + (SPX_LEAF_BITS + 7) // 8  # 30
+SPX_FULL_HEIGHT = 33
+SPX_D = 3
+SPX_TREE_HEIGHT = 11  # SPX_FULL_HEIGHT / SPX_D
+SPX_FORS_HEIGHT = 15
+SPX_FORS_TREES = 9
+SPX_FORS_BASE_OFFSET = 1 << SPX_FORS_HEIGHT  # 32768
+SPX_FORS_MSG_BYTES = (SPX_FORS_HEIGHT * SPX_FORS_TREES + 7) // 8  # 17
+SPX_TREE_BITS = SPX_TREE_HEIGHT * (SPX_D - 1)  # 22
+SPX_LEAF_BITS = SPX_TREE_HEIGHT  # 11
+SPX_DGST_BYTES = SPX_FORS_MSG_BYTES + (SPX_TREE_BITS + 7) // 8 + (SPX_LEAF_BITS + 7) // 8  # 22
 SPX_WOTS_W = 16
 SPX_WOTS_LOGW = 4
 SPX_WOTS_LEN1 = 8 * SPX_N // SPX_WOTS_LOGW  # 32
-SPX_WOTS_LEN2 = 3  # checksum length
-SPX_WOTS_LEN = SPX_WOTS_LEN1 + SPX_WOTS_LEN2  # 35
+# WOTS+C: no checksum chains — grinding replaces them
+SPX_WOTS_LEN = SPX_WOTS_LEN1  # 32
+SPX_WOTS_CSUM = 304  # Target sum of all base-w digits for WOTS+C grinding
 
 class Address:
     """
@@ -185,24 +187,29 @@ def base_w_128s(input_array: List[int]) -> List[int]:
     return out
 
 
-def compute_checksum(msg_base_w: List[int]) -> List[int]:
+def grind_wotsc_counter(pk_seed: int, wots_pk_addr: Address, root: int) -> tuple:
     """
-    Compute WOTS checksum in base-w.
-    Matches Cairo's wots_pk_from_sig checksum computation.
+    WOTS+C grinding: find counter such that sum(base_w(H(wotspk_addr, [root, counter]))) == SPX_WOTS_CSUM.
+
+    Matches Cairo's verify_128s_with_ctx:
+        root_digest = thash(ctx, @wots_pk_addr, array![root, *counter].span())
+        root_u32_array = felt252_to_u32_array(root_digest)  # little-endian
+        verify_checksum_128s: asserts sum(base_w(root_u32_array)) == SPX_WOTS_CSUM
+
+    Returns: (counter: int, root_digest: int, msg_u32: List[int], digits: List[int])
     """
-    csum = 0
-    for digit in msg_base_w:
-        csum += (SPX_WOTS_W - 1) - digit
-
-    # Convert checksum to base-w (SPX_WOTS_LEN2 = 3 digits for W=16)
-    # Must match Cairo's big-endian nibble order: [e, f, g] for csum = 0xefg
-    e = csum // 0x100
-    fg = csum % 0x100
-    f = fg // 0x10
-    g = fg % 0x10
-
-    return [e, f, g]
-
+    counter = 0
+    MAX_COUNTER = 100_000
+    while counter < MAX_COUNTER:
+        root_digest = thash(pk_seed, wots_pk_addr, [root, counter])
+        msg_u32 = felt252_to_u32_array(root_digest)  # little-endian
+        digits = base_w_128s(msg_u32)
+        if sum(digits) == SPX_WOTS_CSUM:
+            return counter, root_digest, msg_u32, digits
+        if counter % 1000 == 0:
+            print(f"Grinding WOTS+C: counter={counter}, sum={sum(digits)}")
+        counter += 1
+    raise ValueError(f"WOTS+C grinding failed after {MAX_COUNTER} attempts")
 
 def chain_hash(pk_seed: int, address: Address, input_val: int, start: int, steps: int) -> int:
     """
@@ -256,28 +263,24 @@ def wots_pk_compressed(pk_seed: int, sk_seed: int, address: Address) -> int:
     return thash(pk_seed, addr, pk_list)
 
 
-def wots_sign(pk_seed: int, sk_seed: int, message_root: int, address: Address) -> List[int]:
+def wots_sign_wotsc(pk_seed: int, sk_seed: int, message_root: int, address: Address) -> dict:
     """
-    Sign with WOTS using standard W=16 with checksum.
+    Sign with WOTS+C: grind a counter so that sum(base_w(H(wotspk_addr, [root, counter]))) == SPX_WOTS_CSUM.
 
     Args:
-        message_root: felt252 value to sign
+        message_root: felt252 value to sign (FORS pk or previous layer root)
+        address: WOTS address (type WOTS, keypair set)
 
-    Returns: list of SPX_WOTS_LEN=35 felt252 signature values
+    Returns: dict with 'chains' (SPX_WOTS_LEN=32 felt252 sig values) and 'counter' (int)
     """
-    # Convert message to u32 array (little-endian)
-    msg_u32 = felt252_to_u32_array(message_root)
+    # Build WOTSPK address for grinding (same as wots_addr but type WOTSPK)
+    wots_pk_addr = address.copy()
+    wots_pk_addr.set_type(Address.WOTSPK)
 
-    # Convert to base-w
-    msg_base_w = base_w_128s(msg_u32)
+    # Grind counter until checksum constraint is satisfied
+    counter, _root_digest, _msg_u32, digits = grind_wotsc_counter(pk_seed, wots_pk_addr, message_root)
 
-    # Compute checksum
-    checksum = compute_checksum(msg_base_w)
-
-    # Full message with checksum
-    digits = msg_base_w + checksum
-
-    # Generate signature chains
+    # Generate signature chains using the ground digits
     sig_chains = []
     for i in range(SPX_WOTS_LEN):
         sk = wots_sk(pk_seed, sk_seed, address, i)
@@ -288,7 +291,7 @@ def wots_sign(pk_seed: int, sk_seed: int, message_root: int, address: Address) -
         sig_i = chain_hash(pk_seed, addr, sk, 0, digits[i])
         sig_chains.append(sig_i)
 
-    return sig_chains
+    return {'chains': sig_chains, 'counter': counter}
 
 
 def fors_sk_leaf(pk_seed: int, sk_seed: int, address: Address, tree_idx: int, leaf_idx: int) -> int:
@@ -357,86 +360,22 @@ def fors_pk(pk_seed: int, sk_seed: int, address: Address) -> int:
     addr.set_type(Address.FORSPK)
     return thash(pk_seed, addr, roots)
 
-
-def mhash_felt_to_wordspan(mhash_felt: int) -> List[tuple]:
+def message_to_indices(mhash: int) -> List[int]:
     """
-    Convert mhash felt252 to WordSpan representation: list of (word, num_bytes) pairs.
-    Matches Cairo's split_xdigest_128s output format.
-
-    The mhash is 21 bytes = 5 full u32 words (big-endian) + 1 trailing byte.
-    """
-    # Convert felt252 to 21 big-endian bytes
-    mhash_bytes = mhash_felt.to_bytes(SPX_FORS_MSG_BYTES, byteorder='big')
-
-    words = []
-    full_words = len(mhash_bytes) // 4  # 5
-    for i in range(full_words):
-        w = (mhash_bytes[i*4] << 24) | (mhash_bytes[i*4+1] << 16) | \
-            (mhash_bytes[i*4+2] << 8) | mhash_bytes[i*4+3]
-        words.append((w, 4))
-
-    remaining = len(mhash_bytes) % 4  # 1
-    if remaining > 0:
-        last_word = 0
-        for j in range(remaining):
-            last_word = (last_word << 8) | mhash_bytes[full_words * 4 + j]
-        words.append((last_word, remaining))
-
-    return words
-
-
-def message_to_indices(mhash_felt: int) -> List[int]:
-    """
-    Convert FORS message hash (felt252) to leaf indices (12 bits each, k=14 indices).
+    Convert FORS message hash to leaf indices (SPX_FORS_HEIGHT=15 bits each, k=9 indices).
     Must match Cairo's message_to_indices_128s exactly.
 
-    Cairo processes WordSpan words in order, but reverses bytes within each u32 word
-    to get little-endian byte order, then extracts 12-bit indices from that stream.
+    Args:
+        mhash: 17-byte value packed into an int (from split_digest)
     """
-    wordspan = mhash_felt_to_wordspan(mhash_felt)
+    mhash_words = []
+    # 1st tree gets the highest 15 bits, 2nd gets next 15 bits
+    for i in range(SPX_FORS_TREES):
+        shift = (SPX_FORS_TREES - 1 - i) * SPX_FORS_HEIGHT + 1 # this ensures we include the top bit
+        word = (mhash >> shift) & ((1 << SPX_FORS_HEIGHT) - 1)
+        mhash_words.append(word)
 
-    indices = []
-    acc = 0
-    acc_bits = 0
-
-    for word, num_bytes in wordspan:
-        if num_bytes == 4:
-            # Decompose BE word [ab cd ef gh] into bytes
-            ab = (word >> 24) & 0xFF
-            cd = (word >> 16) & 0xFF
-            ef = (word >> 8) & 0xFF
-            gh = word & 0xFF
-
-            if acc_bits == 0:
-                c = cd >> 4
-                d = cd & 0xF
-                indices.append(d * 0x100 + ab)
-                indices.append(ef * 0x10 + c)
-                acc = gh
-                acc_bits = 8
-            elif acc_bits == 8:
-                a = ab >> 4
-                b = ab & 0xF
-                g = gh >> 4
-                h = gh & 0xF
-                indices.append(b * 0x100 + acc)
-                indices.append(cd * 0x10 + a)
-                indices.append(h * 0x100 + ef)
-                acc = g
-                acc_bits = 4
-            elif acc_bits == 4:
-                e = ef >> 4
-                f = ef & 0xF
-                indices.append(ab * 0x10 + acc)
-                indices.append(f * 0x100 + cd)
-                indices.append(gh * 0x10 + e)
-                acc = 0
-                acc_bits = 0
-        elif num_bytes == 1:
-            assert acc_bits == 4, f'invalid acc_bits ({acc_bits}) for last byte'
-            indices.append(word * 0x10 + acc)
-
-    return indices
+    return mhash_words
 
 
 def fors_sign(pk_seed: int, sk_seed: int, mhash: int, address: Address) -> List[tuple]:
@@ -444,11 +383,13 @@ def fors_sign(pk_seed: int, sk_seed: int, mhash: int, address: Address) -> List[
     Generate FORS signature.
 
     Args:
-        mhash: felt252 message hash
+        mhash: 17-byte value packed into an int (from split_digest)
+        mhash_last: trailing byte from split_digest
 
     Returns: list of (sk, auth_path) tuples, each element is felt252
     """
     indices = message_to_indices(mhash)
+    print("FORSIndices:", indices)
 
     tree_sigs = []
     for tree_idx in range(SPX_FORS_TREES):
@@ -571,13 +512,34 @@ def message_to_wordarray_felts(message_u32: List[int], last_word: int = 0, last_
 def split_digest(digest: int) -> tuple:
     """
     Split extended digest into mhash, tree_addr, leaf_idx.
-    Must match Cairo's split_xdigest_128s in sphincs.cairo:117-147.
+    Must match Cairo's split_xdigest_128s in sphincs.cairo.
 
-    Returns: (mhash: felt252, tree_addr: int, leaf_idx: int)
+    For sphincs-poseidon+c params (SPX_DGST_BYTES = 22 bytes = 176 bits):
+      Digest layout (from LSB):
+        bits  0-10  : leaf_idx       (SPX_LEAF_BITS = 11)
+        bits 11-15  : unused         (SPX_LEAF_BYTES*8 - SPX_LEAF_BITS = 5)
+        bits 16-37  : tree_address   (SPX_TREE_BITS = 22)
+        bits 38-39  : unused         (SPX_TREE_BYTES*8 - SPX_TREE_BITS = 2)
+        bits 40-175 : mhash          (SPX_FORS_MSG_BYTES = 17 bytes = 136 bits)
+
+      In the 8 u32 words [a,b,c,d,e,f,g,h] (a=MSB, h=LSB):
+        a = 0, b = 0  (zero, beyond 176-bit digest)
+        c < 2^16      (only lower 16 bits used, holds mhash bytes 15-16)
+        d             (mhash bytes 11-14)
+        e             (mhash bytes 7-10)
+        f             (mhash bytes 3-6)
+        g[8:32]       (mhash bytes 0-2)
+        g[6:8]        (2 unused tree bits)
+        g[0:6]        (tree_address bits 16-21, upper 6 bits)
+        h[16:32]      (tree_address bits  0-15, lower 16 bits)
+        h[11:16]      (5 unused leaf bits)
+        h[0:11]       (leaf_idx)
+
+    Returns: (mhash: int, tree_addr: int, leaf_idx: int)
+      where mhash is the 17-byte value packed into an int:
     """
-    # Convert to u32 array (big-endian)
+    # Convert to u32 array (big-endian): a = MSB word, h = LSB word
     def felt252_to_u32_array_be(value: int) -> List[int]:
-        # Convert to u256 first
         u256_val = value & ((1 << 256) - 1)
         result = []
         for _ in range(8):
@@ -586,38 +548,31 @@ def split_digest(digest: int) -> tuple:
         return result
 
     arr = felt252_to_u32_array_be(digest)
-    a, b, c, d, e, f, g, h = arr
+    _a, _b, c, d, e, f, g, h = arr
 
-    # Work backwards from least significant bits
-    # Take last 9 bits from h as leaf index
-    leaf_idx = h & 0x1FF
-    h_rem = h >> 9
+    # --- leaf_idx: lower 11 bits of h (SPX_LEAF_BITS=11, divisor=2^11=0x800) ---
+    leaf_idx = h & 0x7FF
+    h_rem = h >> 11
 
-    # Take next 54 bits as tree address from h, g, f
-    # h[16:32] + g[0:32] + f[0:6] = 54 bits
-    f_mod = f & 0x3F  # 6 bits
-    tree_address = (h_rem // 0x80) + (g * 0x10000) + (f_mod * 0x1000000000000)
+    # h_rem = h[11:32] (21 bits). Skip h[11:16] (5 unused bits).
+    # h_tree = h[16:32] = lower 16 bits of tree_address.
+    h_tree = h_rem >> 5  # drop 5 bits → bits 16-31 of h
 
-    # f[8:32] + e + d + c + b + a[0:16] = message hash (21 bytes)
-    a_mod = a & 0xFFFF
+    # --- tree_address: 22 bits spanning g[0:6] and h[16:32] ---
+    # g[0:6] = upper 6 bits of tree_address
+    g_tree = g & 0x3F       # lower 6 bits = tree_address upper bits
+    g_div = g >> 6           # g[6:32]
+    # Skip g[6:8] (2 unused bits)
+    g_mhash = g_div >> 2     # g[8:32] = 24 bits, 3 mhash bytes
 
-    # Reconstruct mhash as felt252
-    # Take bits: a[0:16] + b + c + d + e + f[6:32]
-    f_hi = f >> 8  # upper 24 bits of f
-    e_full = e
-    d_full = d
-    c_full = c
-    b_full = b
-    a_lo = a_mod
+    tree_address = (g_tree << 16) | h_tree
 
-    # Build 21-byte (168-bit) value
-    mhash = (a_lo << 152) | (b_full << 120) | (c_full << 88) | (d_full << 56) | (e_full << 24) | f_hi
-
+    mhash = g_mhash + f * (1 << 24) + e * (1 << 56) + d * (1 << 88) + (c % 0x10000) * (1 << 120)
     return mhash, tree_address, leaf_idx
 
 
 class SphincsPoseidonSigner:
-    """Complete SPHINCS+ Poseidon signer (no grinding, standard WOTS+)."""
+    """Complete SPHINCS+ Poseidon signer with WOTS+C (counter grinding)."""
 
     def __init__(self, sk_seed: int, pk_seed: int, pk_root: int = None):
         self.sk_seed = sk_seed
@@ -659,7 +614,7 @@ class SphincsPoseidonSigner:
         mhash, tree_addr, leaf_idx = split_digest(digest)
 
         if not quiet:
-            print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}", file=sys.stderr)
+            print(f"Message digest: tree_addr={tree_addr}, leaf_idx={leaf_idx}, message_hash={hex(mhash)}", file=sys.stderr)
 
         # FORS address
         fors_addr = Address()
@@ -695,15 +650,19 @@ class SphincsPoseidonSigner:
             addr.set_keypair(current_leaf_idx)
             addr.set_type(Address.WOTS)
 
-            # Sign with WOTS (standard W=16 with checksum)
-            sig_chains = wots_sign(self.pk_seed, self.sk_seed, current_root, addr)
+            # Sign with WOTS+C (grinding over counter, no checksum chains)
+            wotsc_result = wots_sign_wotsc(self.pk_seed, self.sk_seed, current_root, addr)
+
+            if not quiet:
+                print(f"  WOTS+C counter={wotsc_result['counter']}", file=sys.stderr)
 
             # Generate auth path for this layer
             addr.set_type(Address.HASHTREE)
             auth_path = ht_gen_auth(self.pk_seed, self.sk_seed, addr, current_leaf_idx)
 
             wots_sigs.append({
-                'chains': sig_chains,
+                'chains': wotsc_result['chains'],
+                'counter': wotsc_result['counter'],
                 'auth_path': auth_path
             })
 
@@ -744,17 +703,18 @@ def serialize_test_vector(sig: dict, pk_seed: int, pk_root: int,
     # === Signature ===
     result.append(sig['randomizer'])  # felt252
 
-    # FORS signature: 14 trees * (sk + 12 auth_path entries)
+    # FORS signature: SPX_FORS_TREES=9 trees * (sk + SPX_FORS_HEIGHT=15 auth_path entries)
     for sk, auth in sig['fors_sig']:
         result.append(sk)      # felt252
-        result.extend(auth)    # 12 felt252 values
+        result.extend(auth)    # SPX_FORS_HEIGHT felt252 values
 
-    # WOTS Merkle signatures: 7 layers
+    # WOTS+C Merkle signatures: SPX_D=3 layers
     for wots_sig in sig['wots_sigs']:
-        # 35 chains (SPX_WOTS_LEN = 35)
-        result.extend(wots_sig['chains'])  # 35 felt252 values
-        # 9 auth path entries (SPX_TREE_HEIGHT = 9)
-        result.extend(wots_sig['auth_path'])  # 9 felt252 values
+        # SPX_WOTS_LEN=32 chains (no checksum chains in WOTS+C)
+        result.extend(wots_sig['chains'])    # 32 felt252 values
+        result.append(wots_sig['counter'])   # counter (felt252)
+        # SPX_TREE_HEIGHT=11 auth path entries
+        result.extend(wots_sig['auth_path'])  # 11 felt252 values
 
     # === Message as WordArray (u32 words) ===
     result.extend(message_to_wordarray_felts(message_u32, last_word, last_num_bytes))
@@ -778,15 +738,16 @@ def serialize_multi_sig_vector(sigs: list, pk_seed: int, pk_root: int, messages:
         # Signature
         result.append(sig['randomizer'])  # felt252
 
-        # FORS signature: 14 trees * (sk + 12 auth_path entries)
+        # FORS signature: SPX_FORS_TREES=9 trees * (sk + SPX_FORS_HEIGHT=15 auth_path entries)
         for sk, auth in sig['fors_sig']:
             result.append(sk)      # felt252
-            result.extend(auth)    # 12 felt252 values
+            result.extend(auth)    # SPX_FORS_HEIGHT felt252 values
 
-        # WOTS Merkle signatures: 7 layers
+        # WOTS+C Merkle signatures: SPX_D=3 layers
         for wots_sig in sig['wots_sigs']:
-            result.extend(wots_sig['chains'])     # 35 felt252 values
-            result.extend(wots_sig['auth_path'])  # 9 felt252 values
+            result.extend(wots_sig['chains'])    # 32 felt252 values
+            result.append(wots_sig['counter'])   # counter (felt252)
+            result.extend(wots_sig['auth_path'])  # 11 felt252 values
 
         # Message as WordArray
         result.extend(message_to_wordarray_felts(msg_u32, last_word, last_num_bytes))

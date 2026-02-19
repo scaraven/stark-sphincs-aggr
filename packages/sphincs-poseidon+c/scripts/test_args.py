@@ -1,4 +1,4 @@
-from generate_args import hash_message, split_digest, Address, thash
+from generate_args import hash_message, split_digest, Address, thash, message_to_indices
 from hash import poseidon_hash
 
 def test_hash_message():
@@ -25,8 +25,8 @@ def test_split_digest():
     digest = 0x5f6f74792de379a6337bbad9e4a1621e38c5e3827d8ae84c41501d68e961
     mhash, tree_addr, leaf_idx = split_digest(digest)
     assert(leaf_idx == 0x161)
-    assert(tree_addr == 0xae84c41501d68)
-    assert(mhash == 0x5f6f74792de379a6337bbad9e4a1621e38c5e3827d)
+    assert(tree_addr == 0x101d68)
+    assert(mhash == 0x337bbad9e4a1621e38c5e3827d8ae84c41)
 
 def test_initialize_pk():
     pk_seed = 0x1234
@@ -44,11 +44,15 @@ def test_thash():
     digest = thash(pk_seed, address, input_data)
     assert(digest == 1190188513163088186241995297500126947589582629387601832785015242379216793975)
 
-
+def test_indices():
+    mhash = 0x1a291170e1bac7a22b05937abd0a24585d
+    indices = message_to_indices(mhash)
+    assert(len(indices) == 9)
+    assert(indices == [3348, 17500, 7223, 11386, 4440, 5709, 30074, 2596, 11310])
 
 if __name__ == "__main__":
     test_hash_message()
     test_split_digest()
     test_initialize_pk()
     test_thash()
-    
+    test_indices()

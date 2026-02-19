@@ -5,7 +5,6 @@
 //! FORS (Forest of Random Subsets) is a few-times signature (FTS) scheme.
 //! See https://research.dorahacks.io/2022/12/16/hash-based-post-quantum-signatures-2/ for an
 //! overview and https://www.di-mgt.com.au/pqc-09-fors-sig.html for a step-by-step construction.
-use core::traits::DivRem;
 use crate::address::{Address, AddressTrait, AddressType};
 use crate::hasher::{
     HashOutput, SpxCtx, thash_fors_tree_root, partial_seed_4, thash_single_partial_4,
@@ -82,60 +81,56 @@ pub fn fors_pk_from_sig(
     panic!("invalid number of FORS trees");
 }
 
-/// Convert FORS mhash to leaves indices.
-///
-/// A simplified flow:
-/// - reinterpret mhash as a little-endian integer
-/// - calculate SPX_FORS_TREES remainders modulo SPX_FORS_HEIGHT
-///
-/// In other words, we are iterating over the mhash in reverse byte order,
-/// interpreting every SPX_FORS_HEIGHT chunk of bits as a little-endian integer.
+/// Convert FORS mhash to leaf indices.
+/// For Bitcoin params: k=9 trees, a=15 height
+/// Total bits needed: 9 * 15 = 135 bits ~= 17 bytes
 fn message_to_indices_128s(mut mhash: WordSpan) -> Array<u32> {
     let mut indices = array![];
+    let mut acc: u32 = 0;
+    let mut acc_bits: u32 = 0;
 
-    // Accumulator is the LSB "carry" from the previous word.
-    let mut acc = 0;
-    let mut acc_bits = 0;
+    while let Some((word, num_bytes)) = mhash.pop_front() {
+        let mut remaining = word;
+        let mut bytes_left = num_bytes;
 
-    // Mhash structure: words are byte-reversed, we are going in LE order.
-    // [8|4 4|8, 8] [4 4|8 8|4, 4] [8 8|4 4|8] [8|4 4|8, 8] [4 8|4 4|8, 4] [8]
-    while let Some((mut word, num_bytes)) = mhash.pop_front() {
-        if num_bytes == 4 {
-            // Our word [ab cd ef gh] is in BE, we need to decompose it into bytes
-            let (ab, cdefgh) = DivRem::div_rem(word, 0x1000000);
-            let (cd, efgh) = DivRem::div_rem(cdefgh, 0x10000);
-            let (ef, gh) = DivRem::div_rem(efgh, 0x100);
-
-            if acc_bits == 0 { // [dab efc, gh]
-                let (c, d) = DivRem::div_rem(cd, 0x10);
-                indices.append(d * 0x100 + ab);
-                indices.append(ef * 0x10 + c);
-                acc = gh;
-                acc_bits = 8;
-            } else if acc_bits == 8 { // [bxx cda hef, g]
-                let (a, b) = DivRem::div_rem(ab, 0x10);
-                let (g, h) = DivRem::div_rem(gh, 0x10);
-                indices.append(b * 0x100 + acc);
-                indices.append(cd * 0x10 + a);
-                indices.append(h * 0x100 + ef);
-                acc = g;
-                acc_bits = 4;
-            } else if acc_bits == 4 { // [abx fcd ghe]
-                let (e, f) = DivRem::div_rem(ef, 0x10);
-                indices.append(ab * 0x10 + acc);
-                indices.append(f * 0x100 + cd);
-                indices.append(gh * 0x10 + e);
-                acc = 0;
-                acc_bits = 0;
+        while bytes_left > 0 {
+            // Extract one byte (big-endian)
+            let shift = (bytes_left - 1) * 8;
+            let byte_val = if shift == 24 {
+                remaining / 0x1000000
+            } else if shift == 16 {
+                (remaining / 0x10000) % 0x100
+            } else if shift == 8 {
+                (remaining / 0x100) % 0x100
             } else {
-                assert(false, 'invalid acc_bits (4)');
+                remaining % 0x100
+            };
+
+            acc = acc * 0x100 + byte_val;
+            acc_bits += 8;
+
+            // Extract 15-bit indices when we have enough bits
+            while acc_bits >= SPX_FORS_HEIGHT && indices.len() < SPX_FORS_HEIGHT {
+                let shift_amount = acc_bits - SPX_FORS_HEIGHT;
+                let divisor: u32 = if shift_amount == 0 {
+                    1
+                } else {
+                    let mut d: u32 = 1;
+                    let mut i: u32 = 0;
+                    while i < shift_amount {
+                        d *= 2;
+                        i += 1;
+                    }
+                    d
+                };
+                let index = acc / divisor;
+                let mask = divisor - 1;
+                acc = acc & mask;
+                acc_bits -= SPX_FORS_HEIGHT;
+                indices.append(index % 0x8000); // Ensure 15-bit value
             }
-        } else if num_bytes == 1 { // [abx]
-            // Last word is one byte (lowest)
-            assert(acc_bits == 4, 'invalid acc_bits (1)');
-            indices.append(word * 0x10 + acc);
-        } else {
-            assert(false, 'invalid mhash length');
+
+            bytes_left -= 1;
         }
     }
 
@@ -150,12 +145,9 @@ mod tests {
 
     #[test]
     fn test_message_to_indices_128s() {
-        let mhash = words_from_hex("6059c80500bb1e198b352d9edde57e7550ccc7a97e");
-        assert_eq!(mhash.byte_len(), 21);
+        let mhash = words_from_hex("1a291170e1bac7a22b05937abd0a24585d");
         let indices = message_to_indices_128s(mhash.span());
-        let expected = array![
-            2400, 3205, 5, 2992, 2334, 2225, 3381, 2530, 1501, 2030, 117, 3269, 2503, 2026,
-        ];
+        let expected = array![3348, 17500, 7223, 11386, 4440, 5709, 30074, 2596, 11310];
         assert_eq!(expected, indices);
     }
 }

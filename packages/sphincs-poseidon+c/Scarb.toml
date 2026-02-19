@@ -1,0 +1,29 @@
+[package]
+name = "sphincs_poseidon_c"
+version = "0.1.0"
+edition = "2024_07"
+
+experimental-features = ["user_defined_inline_macros"]
+
+[lib]
+
+[[target.executable]]
+name = "main_multi"
+function = "sphincs_poseidon_c::main_multi"
+
+[[target.executable]]
+name = "main"
+function = "sphincs_poseidon_c::main"
+
+[dependencies]
+cairo_execute = "2.11.4"
+oracle = "0.1.0-dev.4"
+sphincs_core = { path = "../sphincs-core" }
+
+[dev-dependencies]
+cairo_test = "2.11.4"
+
+[features]
+default = []
+sparse_addr = []
+debug = []

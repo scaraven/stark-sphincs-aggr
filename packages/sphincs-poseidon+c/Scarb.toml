@@ -8,11 +8,11 @@ experimental-features = ["user_defined_inline_macros"]
 [lib]
 
 [[target.executable]]
-name = "main_multi"
+name = "poseidon_tiny_multi"
 function = "sphincs_poseidon_c::main_multi"
 
 [[target.executable]]
-name = "main"
+name = "poseidon_tiny_main"
 function = "sphincs_poseidon_c::main"
 
 [dependencies]

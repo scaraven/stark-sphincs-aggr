@@ -57,3 +57,11 @@ dependencies = [
  "oracle",
  "sphincs_core",
 ]
+
+[[package]]
+name = "sphincs_poseidon_c"
+version = "0.1.0"
+dependencies = [
+ "oracle",
+ "sphincs_core",
+]

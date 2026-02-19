@@ -6,13 +6,12 @@
 //! See https://research.dorahacks.io/2022/10/26/hash-based-post-quantum-signatures-1/ for an
 //! overview.
 //! See also https://www.di-mgt.com.au/pqc-03-winternitz.html
-
 use core::traits::DivRem;
 use crate::address::{Address, AddressTrait};
 use crate::hasher::{
     HashOutput, HashOutputSerde, SpxCtx, partial_seed_5, thash_single_partial_5,
 };
-use crate::params_128s::SPX_WOTS_LEN;
+use crate::params_128s::{SPX_WOTS_CSUM, SPX_WOTS_LEN};
 
 /// WOTS+ signature: array of partially hashed private keys.
 pub type WotsSignature = [HashOutput; SPX_WOTS_LEN];
@@ -44,10 +43,10 @@ pub impl WotsSignatureDefault of Default<WotsSignature> {
 
 /// Takes a WOTS signature and an n-byte message, computes a WOTS public key.
 pub fn wots_pk_from_sig(
-    ctx: SpxCtx, sig: WotsSignature, message: Array<u32>, address: @Address,
+    ctx: SpxCtx, sig: WotsSignature, modified_message: Array<u32>, address: @Address,
 ) -> Array<felt252> {
-    let mut lengths = base_w_128s(message.span());
-    add_checksum_128s(ref lengths);
+    let mut lengths = base_w_128s(modified_message.span());
+    verify_checksum_128s(ref lengths);
 
     let mut sig_iter = sig.span();
     let mut lengths_iter = lengths.span();
@@ -69,21 +68,14 @@ pub fn wots_pk_from_sig(
 }
 
 /// Computes the WOTS+ checksum over a message (in base_w) and appends it to the end.
-pub fn add_checksum_128s(ref message_w: Array<u32>) {
+pub fn verify_checksum_128s(ref message_w: Array<u32>) {
     let mut csum: u32 = 0;
 
-    let mut msg_iter = message_w.span();
-    while let Some(elt_w) = msg_iter.pop_front() {
-        csum += 15 - *elt_w; // SPX_WOTS_W - 1 - elt_w
+    for el in message_w.span() {
+        csum += *el;
     }
 
-    // Convert checksum to base_w.
-    // For 128s the size of checksum is 12 bits.
-    // We shift the checksum left by 4 bits to make sure expected empty zero bits are the least
-    // significant bits.
-    let (e, fg) = DivRem::div_rem(csum, 0x100);
-    let (f, g) = DivRem::div_rem(fg, 0x10);
-    message_w.append_span(array![e, f, g].span());
+    assert!(csum == SPX_WOTS_CSUM, "Invalid WOTS+ checksum: expected {}, got {}", SPX_WOTS_CSUM, csum);
 }
 
 /// Compute the H^{steps}(input) hash chain given the chain length (start) and return the last

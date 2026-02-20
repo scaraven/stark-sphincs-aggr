@@ -20,3 +20,5 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+results/multisig_n*.json

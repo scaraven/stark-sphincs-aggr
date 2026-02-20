@@ -25,6 +25,7 @@ class MultiSigBenchmarkRunner:
         "sphincs-btc": "main_multi",
         "sphincs-poseidon": "poseidon_multi",
         "schnorr-btc": "schnorr_btc_multi",
+        "sphincs-poseidon-c" : "poseidon_c_multi",
     }
 
     def __init__(self, workspace_root: Path, package: str = "sphincs-btc"):
@@ -394,6 +395,12 @@ class MultiSigBenchmarkRunner:
 
     def save_results(self, result: Dict[str, Any], output_file: str = None):
         """Save benchmark results to JSON file."""
+        # Check if any stage failed and skip writing logs if so
+        for key in ("generation", "build", "execution", "proof"):
+            if key in result and not result[key].get("success", True):
+                print(f"Skipping result log write due to error in '{key}' stage.")
+                return
+
         if output_file is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = self.results_dir / f"multisig_benchmark_{timestamp}.json"

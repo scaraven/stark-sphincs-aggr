@@ -185,7 +185,7 @@ pub fn verify_128s_batch(
 ///     h[0:11]       (leaf_idx)
 fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
     // Split felt252 into u32 words, big-endian (a = most significant, h = least significant)
-    let [_a, _b, c, d, e, f, g, h] = felt252_to_u32_array(digest);
+    let [c, d, e, f, g, h] = felt252_to_u32_array(digest);
 
     // --- leaf_idx: lower 11 bits of h (SPX_LEAF_BITS = 11, divisor = 2^11 = 0x800) ---
     let (h_rem, leaf_idx) = DivRem::div_rem(h, 0x800);
@@ -199,7 +199,7 @@ fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
     // g[0:6] = upper 6 bits of tree_address; g[6:8] = 2 unused bits; g[8:32] = 3 mhash bytes.
     let (g_div, g_tree) = DivRem::div_rem(g, 0x40); // g_tree = g[0:6], g_div = g[6:32]
     // Skip g[6:8] (2 unused bits, SPX_TREE_BYTES*8 - SPX_TREE_BITS).
-    let (g_mhash, _) = DivRem::div_rem(g_div, 0x4); // g_mhash = g[8:32] (24 bits, 3 bytes)
+    let g_mhash = g_div / 0x4; // g_mhash = g[8:32] (24 bits, 3 bytes)
 
     // tree_address: g_tree (bits 16-21) as high part, h_tree (bits 0-15) as low part.
     let tree_address: u64 = g_tree.into() * 0x10000 + h_tree.into();
@@ -215,7 +215,7 @@ fn split_xdigest_128s(digest: felt252) -> XMessageDigest {
     let (f_high, f_low) = DivRem::div_rem(f, 0x10000); // f_high=top 2 bytes, f_low=bottom byte
     let (e_high, e_low) = DivRem::div_rem(e, 0x10000);
     let (d_high, d_low) = DivRem::div_rem(d, 0x10000);
-    let (_, c_bot) = DivRem::div_rem(c, 0x10000); // c < 2^16: c_high=top byte, c_bot=bottom byte
+    let c_bot = c % 0x10000; // c < 2^16: c_high=top byte, c_bot=bottom byte
 
     let arr: Array<u32> = array![
         d_high + c_bot * 0x10000, // c[bot 2B] || d[top 2B] 

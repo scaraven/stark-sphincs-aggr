@@ -4,11 +4,12 @@
 
 // Available address implementations.
 pub mod dense;
+pub mod native;
 pub mod sparse;
 
 // Default address packing according to the sha256-128s parameters.
 #[cfg(not(feature: "sparse_addr"))]
-pub use dense::{Address, AddressTrait};
+pub use native::{Address, AddressTrait};
 
 // Cairo-friendly address packing.
 #[cfg(feature: "sparse_addr")]
@@ -36,6 +37,13 @@ impl AddressTypeToU32 of Into<AddressType, u32> {
             AddressType::WOTSPRF => 5,
             AddressType::FORSPRF => 6,
         }
+    }
+}
+
+impl AddressTypeToFelt of Into<AddressType, felt252> {
+    fn into(self: AddressType) -> felt252 {
+        let u32_val: u32 = self.into();
+        u32_val.into()
     }
 }
 

@@ -122,9 +122,9 @@ pub fn thash_2_partial_4(
     hash_finalize_2(ref state, data0, data1)
 }
 
-/// Convert a felt252 to an array of 8 u32s (big-endian).
+/// Convert a felt252 to an array of 6 u32s (big-endian).
 /// Note the msb u32 will have some leading zeros as felt252 is only 252 bits.
-pub fn felt252_to_u32_array(value: felt252) -> [u32; 8] {
+pub fn felt252_to_u32_array(value: felt252) -> [u32; 6] {
     let mut value_u256: u256 = value.into();
 
     // Take 32 bits at a time
@@ -133,14 +133,10 @@ pub fn felt252_to_u32_array(value: felt252) -> [u32; 8] {
     let (rem, c) = DivRem::div_rem(rem, 0x100000000);
     let (rem, d) = DivRem::div_rem(rem, 0x100000000);
     let (rem, e) = DivRem::div_rem(rem, 0x100000000);
-    let (rem, f) = DivRem::div_rem(rem, 0x100000000);
-    let (rem, g) = DivRem::div_rem(rem, 0x100000000);
-    let (o, h) = DivRem::div_rem(rem, 0x100000000);
-
-    assert(o == 0, 'felt252_to_u32_array: overflow');
+    let (_, f) = DivRem::div_rem(rem, 0x100000000);
 
     [
-        h.try_into().unwrap(), g.try_into().unwrap(), f.try_into().unwrap(), e.try_into().unwrap(),
+        f.try_into().unwrap(), e.try_into().unwrap(),
         d.try_into().unwrap(), c.try_into().unwrap(), b.try_into().unwrap(), a.try_into().unwrap(),
     ]
 }
@@ -165,10 +161,7 @@ pub fn hash_message_128s(
 
     // Apply MGF1 to the seed - optimized to avoid array allocation.
     poseidon::hash_init(ref state);
-    state.state = state.state.update(randomizer);
-    state.state = state.state.update(pk_seed);
-    state.state = state.state.update(seed);
-    state.state = state.state.update(0); // MGF1 counter = 0
+    state.state = state.state.update_with([randomizer, pk_seed, seed, 0]); // MGF1 counter = 0
     let buffer = state.state.finalize();
 
     buffer
@@ -278,7 +271,7 @@ mod tests {
         assert_eq!(
             arr,
             [
-                0x0123456, 0x890abcde, 0xf0123456, 0x890abcde, 0xf0123456, 0x890abcde, 0xf0123456,
+                0xf0123456, 0x890abcde, 0xf0123456, 0x890abcde, 0xf0123456,
                 0x890abcde,
             ],
         );

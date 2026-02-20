@@ -110,31 +110,41 @@ fn message_to_indices_128s(mut mhash: WordSpan) -> Array<u32> {
             acc_bits += 8;
 
             // Extract 15-bit indices when we have enough bits
-            while acc_bits >= SPX_FORS_HEIGHT && indices.len() < SPX_FORS_HEIGHT {
-                let shift_amount = acc_bits - SPX_FORS_HEIGHT;
-                let divisor: u32 = if shift_amount == 0 {
-                    1
-                } else {
-                    let mut d: u32 = 1;
-                    let mut i: u32 = 0;
-                    while i < shift_amount {
-                        d *= 2;
-                        i += 1;
-                    }
-                    d
-                };
-                let index = acc / divisor;
-                let mask = divisor - 1;
-                acc = acc & mask;
-                acc_bits -= SPX_FORS_HEIGHT;
-                indices.append(index % 0x8000); // Ensure 15-bit value
-            }
+            extract_acc_bits(ref acc, ref acc_bits, ref indices);
 
             bytes_left -= 1;
         }
     }
 
     indices
+}
+
+#[inline]
+fn pow2(exp: u32) -> u32 {
+    let mut result: felt252 = 1;
+    let mut base: felt252 = 2;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result *= base;
+        }
+        base *= base;
+        e /= 2;
+    }
+    result.try_into().unwrap()
+}
+
+fn extract_acc_bits(ref acc: u32, ref acc_bits: u32, ref indices: Array<u32>) {
+    // Extract 15-bit indices when we have enough bits
+    while acc_bits >= SPX_FORS_HEIGHT && indices.len() < SPX_FORS_HEIGHT {
+        let shift_amount = acc_bits - SPX_FORS_HEIGHT;
+        let divisor: u32 = pow2(shift_amount);
+        let index = acc / divisor;
+        let mask = divisor - 1;
+        acc = acc & mask;
+        acc_bits -= SPX_FORS_HEIGHT;
+        indices.append(index);
+    }
 }
 
 #[cfg(test)]

@@ -21,4 +21,5 @@ ENV/
 .DS_Store
 Thumbs.db
 
-results/multisig_n*.json
+results/temp_args/multisig_n*.json
+results/temp_args/proving_task_multisig.json

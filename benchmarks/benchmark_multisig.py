@@ -25,7 +25,7 @@ class MultiSigBenchmarkRunner:
         "sphincs-btc": "main_multi",
         "sphincs-poseidon": "poseidon_multi",
         "schnorr-btc": "schnorr_btc_multi",
-        "sphincs-poseidon-c" : "poseidon_c_multi",
+        "sphincs-poseidon-c" : "poseidon_tiny_multi",
     }
 
     def __init__(self, workspace_root: Path, package: str = "sphincs-btc"):
@@ -175,6 +175,8 @@ class MultiSigBenchmarkRunner:
             "--print-resource-usage",
             "--arguments-file", args_file
         ]
+
+        print(" ".join(cmd))
         
         start_time = time.time()
         result = subprocess.run(
@@ -244,8 +246,6 @@ class MultiSigBenchmarkRunner:
 
         try:
             proving_task["tasks"][0]["user_args_file"] = str(Path(args_file).resolve())
-            executable_file = f"{self.executable_name}.executable.json"
-            proving_task["tasks"][0]["path"] = str((self.target_dir / "release" / executable_file).resolve())
         except Exception as exc:
             return {"success": False, "error": f"Failed to patch proving task: {exc}"}
 

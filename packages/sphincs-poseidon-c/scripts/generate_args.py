@@ -207,7 +207,7 @@ def grind_wotsc_counter(pk_seed: int, wots_pk_addr: Address, root: int) -> tuple
         if sum(digits) == SPX_WOTS_CSUM:
             return counter, root_digest, msg_u32, digits
         if counter % 1000 == 0:
-            print(f"Grinding WOTS+C: counter={counter}, sum={sum(digits)}")
+            print(f"Grinding WOTS+C: counter={counter}, sum={sum(digits)}", file=sys.stderr)
         counter += 1
     raise ValueError(f"WOTS+C grinding failed after {MAX_COUNTER} attempts")
 
@@ -389,7 +389,6 @@ def fors_sign(pk_seed: int, sk_seed: int, mhash: int, address: Address) -> List[
     Returns: list of (sk, auth_path) tuples, each element is felt252
     """
     indices = message_to_indices(mhash)
-    print("FORSIndices:", indices)
 
     tree_sigs = []
     for tree_idx in range(SPX_FORS_TREES):

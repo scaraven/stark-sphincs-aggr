@@ -1,0 +1,15 @@
+sphincs-poseidon-c Multi-Signature Benchmark Results
+============================================================
+
+Benchmark
+------------------------------------------------------------
+Signatures: 10
+Seed: 0
+Timestamp: 2026-02-20T11:17:29.921063
+
+Generation Time: 994.73s
+Build Time: 6.73s
+Execution Time: 1.36s
+Prover Time: 124.65s
+Proof Size: 6,000,342 bytes (5859.71 KB)
+Total Time: 1127.47s

@@ -822,6 +822,12 @@ def main():
         help='Output file (default: stdout)'
     )
     parser.add_argument(
+        '--unique-signatures', '-u',
+        type=int,
+        default=5,
+        help='Number of unique signatures to generate; rest are duplicated round-robin (default: 5)'
+    )
+    parser.add_argument(
         '--workers', '-w',
         type=int,
         default=None,
@@ -829,12 +835,14 @@ def main():
     )
     args = parser.parse_args()
 
+    num_unique = min(args.unique_signatures, args.num_signatures)
+
     if args.workers is None:
-        args.workers = os.cpu_count() if args.num_signatures > 1 else 1
+        args.workers = os.cpu_count() if num_unique > 1 else 1
 
     print("=== SPHINCS+ Poseidon Test Vector Generator ===", file=sys.stderr)
     print(f"Parameters: h={SPX_FULL_HEIGHT}, d={SPX_D}, k={SPX_FORS_TREES}, a={SPX_FORS_HEIGHT}, w={SPX_WOTS_W}", file=sys.stderr)
-    print(f"Number of signatures: {args.num_signatures}", file=sys.stderr)
+    print(f"Number of signatures: {args.num_signatures} ({num_unique} unique, {args.num_signatures - num_unique} duplicated)", file=sys.stderr)
     print(f"RNG seed: {args.seed}", file=sys.stderr)
 
     # Derive seeds deterministically
@@ -845,9 +853,9 @@ def main():
     # Create signer
     signer = SphincsPoseidonSigner(sk_seed, pk_seed)
 
-    # Prepare messages
+    # Prepare messages (only for unique signatures)
     messages = []
-    for i in range(args.num_signatures):
+    for i in range(num_unique):
         # Convert message string to u32 words for WordArray representation.
         # Each character becomes a byte, packed into big-endian u32 words.
         message_str = f"{args.message_prefix}{i}"
@@ -870,18 +878,18 @@ def main():
 
         messages.append((message_u32, last_word, last_num_bytes))
 
-    # Generate signatures
-    if args.workers <= 1 or args.num_signatures == 1:
+    # Generate unique signatures
+    if args.workers <= 1 or num_unique == 1:
         # Sequential (preserves progress output)
-        sigs = []
+        unique_sigs = []
         for i, (msg_u32, last_word, last_num_bytes) in enumerate(messages):
-            print(f"\nSigning message {i+1}/{args.num_signatures}: {args.message_prefix}{i}", file=sys.stderr)
+            print(f"\nSigning message {i+1}/{num_unique}: {args.message_prefix}{i}", file=sys.stderr)
             sig = signer.sign(msg_u32, last_word, last_num_bytes)
-            sigs.append(sig)
+            unique_sigs.append(sig)
     else:
         # Parallel
-        print(f"\nSigning {args.num_signatures} messages using {args.workers} workers...", file=sys.stderr)
-        sigs = [None] * args.num_signatures
+        print(f"\nSigning {num_unique} unique messages using {args.workers} workers...", file=sys.stderr)
+        unique_sigs = [None] * num_unique
         with ProcessPoolExecutor(max_workers=args.workers) as executor:
             futures = {
                 executor.submit(
@@ -892,16 +900,22 @@ def main():
             }
             for future in as_completed(futures):
                 idx, sig = future.result()
-                sigs[idx] = sig
-                print(f"  Completed signature {idx+1}/{args.num_signatures}", file=sys.stderr)
+                unique_sigs[idx] = sig
+                print(f"  Completed signature {idx+1}/{num_unique}", file=sys.stderr)
+
+    # Duplicate signatures round-robin to fill up to num_signatures
+    sigs = [unique_sigs[i % num_unique] for i in range(args.num_signatures)]
+    all_messages = [messages[i % num_unique] for i in range(args.num_signatures)]
+    if args.num_signatures > num_unique:
+        print(f"\nDuplicated {num_unique} unique signatures to {args.num_signatures} total (round-robin)", file=sys.stderr)
 
     # Serialize
     if args.num_signatures == 1:
-        msg_u32, msg_last_word, msg_last_num_bytes = messages[0]
+        msg_u32, msg_last_word, msg_last_num_bytes = all_messages[0]
         result = serialize_test_vector(sigs[0], pk_seed, signer.pk_root,
                                        msg_u32, msg_last_word, msg_last_num_bytes)
     else:
-        result = serialize_multi_sig_vector(sigs, pk_seed, signer.pk_root, messages)
+        result = serialize_multi_sig_vector(sigs, pk_seed, signer.pk_root, all_messages)
 
     print(f"\nTotal elements: {len(result)}", file=sys.stderr)
     print(f"Signature(s) generated successfully!", file=sys.stderr)

@@ -314,48 +314,61 @@ def fors_leaf_hash(pk_seed: int, sk_seed: int, address: Address, tree_idx: int, 
     return thash(pk_seed, addr, [sk])
 
 
-def fors_treehash(pk_seed: int, sk_seed: int, address: Address,
-                  tree_idx: int, start_idx: int, height: int) -> int:
-    """Compute FORS subtree root using treehash. Returns felt252."""
-    if height == 0:
-        return fors_leaf_hash(pk_seed, sk_seed, address, tree_idx, start_idx)
+def build_fors_tree(pk_seed: int, sk_seed: int, address: Address, tree_idx: int) -> List[int]:
+    """
+    Build a complete FORS tree bottom-up and return it as a flat array.
 
-    left = fors_treehash(pk_seed, sk_seed, address, tree_idx, start_idx, height - 1)
-    right = fors_treehash(pk_seed, sk_seed, address, tree_idx, start_idx + (1 << (height - 1)), height - 1)
+    Uses 1-indexed binary heap layout:
+        nodes[1] = root
+        nodes[num_leaves .. 2*num_leaves-1] = leaves
+        parent of nodes[i] = nodes[i >> 1]
+        children of nodes[i] = nodes[2*i], nodes[2*i+1]
 
-    addr = address.copy()
-    addr.set_type(Address.FORSTREE)
-    addr.set_tree_height(height)
+    Returns: list of length 2*num_leaves (index 0 unused)
+    """
+    num_leaves = 1 << SPX_FORS_HEIGHT  # 32768
+    nodes = [0] * (2 * num_leaves)
     base = tree_idx * SPX_FORS_BASE_OFFSET
-    addr.set_tree_index((base >> height) + (start_idx >> height))
 
-    return thash(pk_seed, addr, [left, right])
+    # Step 1: compute all leaves
+    for i in range(num_leaves):
+        nodes[num_leaves + i] = fors_leaf_hash(pk_seed, sk_seed, address, tree_idx, i)
+
+    # Step 2: build internal nodes bottom-up
+    for h in range(1, SPX_FORS_HEIGHT + 1):
+        # Nodes at this height span indices [num_leaves >> h .. (num_leaves >> h)*2 - 1]
+        level_start = num_leaves >> h
+        level_end = level_start * 2
+        for i in range(level_start, level_end):
+            left = nodes[2 * i]
+            right = nodes[2 * i + 1]
+
+            addr = address.copy()
+            addr.set_type(Address.FORSTREE)
+            addr.set_tree_height(h)
+            # tree_index: the leaf range start for this node is (i - level_start) * (1 << h)
+            leaf_start = (i - level_start) * (1 << h)
+            addr.set_tree_index((base >> h) + (leaf_start >> h))
+
+            nodes[i] = thash(pk_seed, addr, [left, right])
+
+    return nodes
 
 
-def fors_gen_auth(pk_seed: int, sk_seed: int, address: Address,
-                  tree_idx: int, leaf_idx: int) -> List[int]:
-    """Generate FORS authentication path for a leaf. Returns list of felt252."""
+def fors_extract_auth_path(nodes: List[int], leaf_idx: int) -> List[int]:
+    """Extract auth path from a precomputed FORS tree. O(height), no hashing."""
+    num_leaves = 1 << SPX_FORS_HEIGHT
     auth = []
-    for h in range(SPX_FORS_HEIGHT):
-        sibling_idx = (leaf_idx >> h) ^ 1
-        start = sibling_idx << h
-        node = fors_treehash(pk_seed, sk_seed, address, tree_idx, start, h)
-        auth.append(node)
+    idx = num_leaves + leaf_idx
+    for _ in range(SPX_FORS_HEIGHT):
+        sibling = idx ^ 1
+        auth.append(nodes[sibling])
+        idx >>= 1
     return auth
 
 
-def fors_tree_root(pk_seed: int, sk_seed: int, address: Address, tree_idx: int) -> int:
-    """Compute root of a single FORS tree. Returns felt252."""
-    return fors_treehash(pk_seed, sk_seed, address, tree_idx, 0, SPX_FORS_HEIGHT)
-
-
-def fors_pk(pk_seed: int, sk_seed: int, address: Address) -> int:
-    """Compute FORS public key (hash of all tree roots). Returns felt252."""
-    roots = []
-    for tree_idx in range(SPX_FORS_TREES):
-        root = fors_tree_root(pk_seed, sk_seed, address, tree_idx)
-        roots.append(root)
-
+def fors_pk_from_trees(pk_seed: int, address: Address, roots: List[int]) -> int:
+    """Compute FORS public key from precomputed tree roots. Returns felt252."""
     addr = address.copy()
     addr.set_type(Address.FORSPK)
     return thash(pk_seed, addr, roots)
@@ -378,66 +391,92 @@ def message_to_indices(mhash: int) -> List[int]:
     return mhash_words
 
 
-def fors_sign(pk_seed: int, sk_seed: int, mhash: int, address: Address) -> List[tuple]:
+def fors_sign_and_pk(pk_seed: int, sk_seed: int, mhash: int, address: Address) -> tuple:
     """
-    Generate FORS signature.
+    Generate FORS signature and public key using bottom-up tree building.
+    Builds each tree once and extracts both auth paths and roots from it.
 
     Args:
         mhash: 17-byte value packed into an int (from split_digest)
-        mhash_last: trailing byte from split_digest
 
-    Returns: list of (sk, auth_path) tuples, each element is felt252
+    Returns: (tree_sigs, fors_root) where tree_sigs is list of (sk, auth_path) tuples
     """
     indices = message_to_indices(mhash)
 
     tree_sigs = []
+    roots = []
     for tree_idx in range(SPX_FORS_TREES):
         leaf_idx = indices[tree_idx]
 
-        # Secret key for this leaf
+        # Build the entire tree once
+        nodes = build_fors_tree(pk_seed, sk_seed, address, tree_idx)
+
+        # Extract root (index 1 in 1-indexed heap)
+        roots.append(nodes[1])
+
+        # Extract secret key for the signed leaf
         sk = fors_sk_leaf(pk_seed, sk_seed, address, tree_idx, leaf_idx)
 
-        # Authentication path
-        auth = fors_gen_auth(pk_seed, sk_seed, address, tree_idx, leaf_idx)
+        # Extract auth path from precomputed tree (no hashing!)
+        auth = fors_extract_auth_path(nodes, leaf_idx)
 
         tree_sigs.append((sk, auth))
 
-    return tree_sigs
+    # Compute FORS public key from the roots
+    fors_root = fors_pk_from_trees(pk_seed, address, roots)
+
+    return tree_sigs, fors_root
 
 
-def ht_leaf(pk_seed: int, sk_seed: int, address: Address, leaf_idx: int) -> int:
-    """Compute hypertree leaf (compressed WOTS pk). Returns felt252."""
-    addr = address.copy()
-    addr.set_keypair(leaf_idx)
-    return wots_pk_compressed(pk_seed, sk_seed, addr)
+def build_ht_layer(pk_seed: int, sk_seed: int, address: Address) -> List[int]:
+    """
+    Build a complete hypertree layer bottom-up and return as a flat array.
+
+    Uses 1-indexed binary heap layout (same as build_fors_tree):
+        nodes[1] = root
+        nodes[num_leaves .. 2*num_leaves-1] = leaves (compressed WOTS PKs)
+
+    Returns: list of length 2*num_leaves (index 0 unused)
+    """
+    num_leaves = 1 << SPX_TREE_HEIGHT  # 2048
+    nodes = [0] * (2 * num_leaves)
+
+    # Step 1: compute all leaves (each is a compressed WOTS PK)
+    for i in range(num_leaves):
+        addr = address.copy()
+        addr.set_keypair(i)
+        nodes[num_leaves + i] = wots_pk_compressed(pk_seed, sk_seed, addr)
+
+    # Step 2: build internal nodes bottom-up
+    for h in range(1, SPX_TREE_HEIGHT + 1):
+        level_start = num_leaves >> h
+        level_end = level_start * 2
+        for i in range(level_start, level_end):
+            left = nodes[2 * i]
+            right = nodes[2 * i + 1]
+
+            addr = address.copy()
+            addr.set_type(Address.HASHTREE)
+            addr.set_tree_height(h)
+            # The leaf range start for node i at this height
+            leaf_start = (i - level_start) * (1 << h)
+            addr.set_tree_index(leaf_start >> h)
+            addr.set_keypair(0)
+
+            nodes[i] = thash(pk_seed, addr, [left, right])
+
+    return nodes
 
 
-def ht_treehash(pk_seed: int, sk_seed: int, address: Address,
-                start_idx: int, height: int) -> int:
-    """Compute subtree root. Returns felt252."""
-    if height == 0:
-        return ht_leaf(pk_seed, sk_seed, address, start_idx)
-
-    left = ht_treehash(pk_seed, sk_seed, address, start_idx, height - 1)
-    right = ht_treehash(pk_seed, sk_seed, address, start_idx + (1 << (height - 1)), height - 1)
-
-    addr = address.copy()
-    addr.set_type(Address.HASHTREE)
-    addr.set_tree_height(height)
-    addr.set_tree_index(start_idx >> height)
-    addr.set_keypair(0)
-
-    return thash(pk_seed, addr, [left, right])
-
-
-def ht_gen_auth(pk_seed: int, sk_seed: int, address: Address, leaf_idx: int) -> List[int]:
-    """Generate authentication path for hypertree layer. Returns list of felt252."""
+def ht_extract_auth_path(nodes: List[int], leaf_idx: int) -> List[int]:
+    """Extract auth path from a precomputed hypertree layer. O(height), no hashing."""
+    num_leaves = 1 << SPX_TREE_HEIGHT
     auth = []
-    for h in range(SPX_TREE_HEIGHT):
-        sibling_idx = (leaf_idx >> h) ^ 1
-        start = sibling_idx << h
-        node = ht_treehash(pk_seed, sk_seed, address, start, h)
-        auth.append(node)
+    idx = num_leaves + leaf_idx
+    for _ in range(SPX_TREE_HEIGHT):
+        sibling = idx ^ 1
+        auth.append(nodes[sibling])
+        idx >>= 1
     return auth
 
 
@@ -590,7 +629,8 @@ class SphincsPoseidonSigner:
         addr = Address()
         addr.set_layer(SPX_D - 1)
         addr.set_tree_addr(0)
-        return ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
+        nodes = build_ht_layer(self.pk_seed, self.sk_seed, addr)
+        return nodes[1]  # root
 
     def sign(self, message_u32: List[int], last_word: int = 0, last_num_bytes: int = 0,
              quiet: bool = False) -> dict:
@@ -622,13 +662,10 @@ class SphincsPoseidonSigner:
         fors_addr.set_type(Address.FORSTREE)
         fors_addr.set_keypair(leaf_idx)
 
-        # Generate FORS signature
+        # Generate FORS signature and public key in one pass (builds each tree once)
         if not quiet:
             print("Generating FORS signature...", file=sys.stderr)
-        fors_sig = fors_sign(self.pk_seed, self.sk_seed, mhash, fors_addr)
-
-        # Compute FORS public key (this is what layer 0 WOTS signs)
-        fors_root = fors_pk(self.pk_seed, self.sk_seed, fors_addr)
+        fors_sig, fors_root = fors_sign_and_pk(self.pk_seed, self.sk_seed, mhash, fors_addr)
         if not quiet:
             print(f"FORS root: {hex(fors_root)}", file=sys.stderr)
 
@@ -655,9 +692,12 @@ class SphincsPoseidonSigner:
             if not quiet:
                 print(f"  WOTS+C counter={wotsc_result['counter']}", file=sys.stderr)
 
-            # Generate auth path for this layer
+            # Build the entire hypertree layer once (gets both auth path and root)
             addr.set_type(Address.HASHTREE)
-            auth_path = ht_gen_auth(self.pk_seed, self.sk_seed, addr, current_leaf_idx)
+            ht_nodes = build_ht_layer(self.pk_seed, self.sk_seed, addr)
+
+            # Extract auth path from precomputed tree (no hashing!)
+            auth_path = ht_extract_auth_path(ht_nodes, current_leaf_idx)
 
             wots_sigs.append({
                 'chains': wotsc_result['chains'],
@@ -665,9 +705,9 @@ class SphincsPoseidonSigner:
                 'auth_path': auth_path
             })
 
-            # Compute this layer's root for next iteration
+            # Extract root for next iteration (already computed!)
             if layer < SPX_D - 1:
-                current_root = ht_treehash(self.pk_seed, self.sk_seed, addr, 0, SPX_TREE_HEIGHT)
+                current_root = ht_nodes[1]  # root
                 current_leaf_idx = current_tree_addr & ((1 << SPX_TREE_HEIGHT) - 1)
                 current_tree_addr >>= SPX_TREE_HEIGHT
 

@@ -319,6 +319,38 @@ class MultiSigBenchmarkRunner:
             "stderr": result.stderr,
         }
 
+    def verify_proof(self, proof_file: str) -> Dict[str, Any]:
+        """Verify a STARK proof using scarb verify."""
+        print(f"\n{'='*60}")
+        print("Verifying STARK proof...")
+        print(f"{'='*60}")
+
+        cmd = [
+            "scarb", "verify",
+            "--proof-file", proof_file,
+        ]
+
+        start_time = time.time()
+        result = subprocess.run(
+            cmd,
+            cwd=self.workspace_root,
+            capture_output=True,
+            text=True
+        )
+        verify_time = time.time() - start_time
+
+        if result.returncode != 0:
+            print(f"Verification failed: {result.stderr}")
+            return {"success": False, "error": result.stderr, "verify_time": verify_time}
+
+        print(f"✓ Proof verified in {verify_time:.2f}s")
+        return {
+            "success": True,
+            "verify_time": verify_time,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
     def run_benchmark(
         self,
         num_sigs: int,
@@ -367,6 +399,11 @@ class MultiSigBenchmarkRunner:
             if not proof_metrics["success"]:
                 return benchmark_result
 
+            # Step 5: Verify
+            if proof_metrics.get("proof_file"):
+                verify_metrics = self.verify_proof(proof_metrics["proof_file"])
+                benchmark_result["verification"] = verify_metrics
+
         # Calculate totals
         total_time = (
             gen_metrics["generation_time"] +
@@ -375,6 +412,8 @@ class MultiSigBenchmarkRunner:
         )
         if run_proof and benchmark_result.get("proof", {}).get("success"):
             total_time += benchmark_result["proof"]["prover_time"]
+        if run_proof and benchmark_result.get("verification", {}).get("success"):
+            total_time += benchmark_result["verification"]["verify_time"]
         benchmark_result["total_time"] = total_time
         
         # Calculate per-signature metrics
@@ -390,6 +429,8 @@ class MultiSigBenchmarkRunner:
         print(f"Total time: {total_time:.2f}s")
         if "per_signature_steps" in benchmark_result:
             print(f"Avg steps per signature: {benchmark_result['per_signature_steps']:,.0f}")
+        if benchmark_result.get("verification", {}).get("success"):
+            print(f"Verification time: {benchmark_result['verification']['verify_time']:.2f}s")
         print(f"{'='*60}\n")
         
         return benchmark_result
@@ -409,7 +450,7 @@ class MultiSigBenchmarkRunner:
     def save_results(self, result: Dict[str, Any], output_file: str = None):
         """Save benchmark results to JSON file."""
         # Check if any stage failed and skip writing logs if so
-        for key in ("generation", "build", "execution", "proof"):
+        for key in ("generation", "build", "execution", "proof", "verification"):
             if key in result and not result[key].get("success", True):
                 print(f"Skipping result log write due to error in '{key}' stage.")
                 return
@@ -460,7 +501,10 @@ class MultiSigBenchmarkRunner:
             if 'proof' in result and result['proof'].get('success'):
                 f.write(f"Prover Time: {result['proof']['prover_time']:.2f}s\n")
                 f.write(f"Proof Size: {result['proof']['proof_size_bytes']:,} bytes ({result['proof']['proof_size_kb']:.2f} KB)\n")
-            
+
+            if 'verification' in result and result['verification'].get('success'):
+                f.write(f"Verification Time: {result['verification']['verify_time']:.2f}s\n")
+
             f.write(f"Total Time: {result['total_time']:.2f}s\n")
 
 

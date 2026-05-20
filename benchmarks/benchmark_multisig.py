@@ -319,51 +319,21 @@ class MultiSigBenchmarkRunner:
             "stderr": result.stderr,
         }
 
-    def verify_proof(self, proof_file: str) -> Dict[str, Any]:
-        """Verify a STARK proof using scarb verify."""
-        print(f"\n{'='*60}")
-        print("Verifying STARK proof...")
-        print(f"{'='*60}")
-
-        cmd = [
-            "scarb", "verify",
-            "--proof-file", proof_file,
-        ]
-
-        start_time = time.time()
-        result = subprocess.run(
-            cmd,
-            cwd=self.workspace_root,
-            capture_output=True,
-            text=True
-        )
-        verify_time = time.time() - start_time
-
-        if result.returncode != 0:
-            print(f"Verification failed: {result.stderr}")
-            return {"success": False, "error": result.stderr, "verify_time": verify_time}
-
-        print(f"✓ Proof verified in {verify_time:.2f}s")
-        return {
-            "success": True,
-            "verify_time": verify_time,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
-
     def run_benchmark(
         self,
         num_sigs: int,
         seed: int,
         message_prefix: str = "test",
         run_proof: bool = True,
-        reuse_args: Optional[str] = None
+        reuse_args: Optional[str] = None,
+        runs: int = 1,
     ) -> Dict[str, Any]:
-        """Run a complete multi-sig benchmark."""
+        """Run a complete multi-sig benchmark, optionally repeated multiple times."""
         print(f"\n{'#'*60}")
         print(f"# Multi-Sig Benchmark")
         print(f"# Signatures: {num_sigs}")
         print(f"# Seed: {seed}")
+        print(f"# Runs: {runs}")
         print(f"# Timestamp: {datetime.now().isoformat()}")
         print(f"{'#'*60}")
 
@@ -372,67 +342,93 @@ class MultiSigBenchmarkRunner:
             "num_signatures": num_sigs,
             "seed": seed,
             "message_prefix": message_prefix,
+            "runs": runs,
         }
 
-        # Step 1: Generate signatures (or reuse existing)
+        # Step 1: Generate signatures (or reuse existing) — done once
         gen_metrics = self._get_or_generate_args(num_sigs, seed, message_prefix, reuse_args)
         benchmark_result["generation"] = gen_metrics
 
         if not gen_metrics["success"]:
             return benchmark_result
-        
-        # Step 2: Build (once)
+
+        # Step 2: Build — done once
         build_metrics = self.build_package()
         benchmark_result["build"] = build_metrics
-        
+
         if not build_metrics["success"]:
             return benchmark_result
-        
-        # Step 3: Execute
-        exec_metrics = self.execute_program(gen_metrics["args_file"], num_sigs)
-        benchmark_result["execution"] = exec_metrics
-        
-        # Step 4: Prove
+
+        # Steps 3 & 4: Execute (and optionally prove), repeated `runs` times
+        execution_runs = []
+        proof_runs = []
+
+        for i in range(runs):
+            if runs > 1:
+                print(f"\n{'='*60}")
+                print(f"Run {i + 1}/{runs}")
+
+            exec_metrics = self.execute_program(gen_metrics["args_file"], num_sigs)
+            execution_runs.append(exec_metrics)
+            if not exec_metrics["success"]:
+                print(f"Execution failed on run {i + 1}, stopping.")
+                break
+
+            if run_proof:
+                proof_metrics = self.generate_proof(gen_metrics["args_file"], num_sigs)
+                proof_runs.append(proof_metrics)
+                if not proof_metrics["success"]:
+                    print(f"Proof failed on run {i + 1}, stopping.")
+                    break
+
+        benchmark_result["execution_runs"] = execution_runs
         if run_proof:
-            proof_metrics = self.generate_proof(gen_metrics["args_file"], num_sigs)
-            benchmark_result["proof"] = proof_metrics
-            if not proof_metrics["success"]:
-                return benchmark_result
+            benchmark_result["proof_runs"] = proof_runs
 
-            # Step 5: Verify
-            if proof_metrics.get("proof_file"):
-                verify_metrics = self.verify_proof(proof_metrics["proof_file"])
-                benchmark_result["verification"] = verify_metrics
+        # Aggregate stats across runs
+        exec_times = [r["execution_time"] for r in execution_runs if r.get("success")]
+        proof_times = [r["prover_time"] for r in proof_runs if r.get("success")]
 
-        # Calculate totals
-        total_time = (
-            gen_metrics["generation_time"] +
-            build_metrics["build_time"] +
-            exec_metrics.get("execution_time", 0)
-        )
-        if run_proof and benchmark_result.get("proof", {}).get("success"):
-            total_time += benchmark_result["proof"]["prover_time"]
-        if run_proof and benchmark_result.get("verification", {}).get("success"):
-            total_time += benchmark_result["verification"]["verify_time"]
-        benchmark_result["total_time"] = total_time
-        
-        # Calculate per-signature metrics
-        if exec_metrics["success"] and num_sigs > 0:
-            resource_usage = exec_metrics["resource_usage"]
+        def _stats(values: List[float]) -> Dict[str, float]:
+            return {
+                "min": min(values),
+                "max": max(values),
+                "mean": sum(values) / len(values),
+                "values": values,
+            }
+
+        if exec_times:
+            benchmark_result["execution_time_stats"] = _stats(exec_times)
+        if proof_times:
+            benchmark_result["proof_time_stats"] = _stats(proof_times)
+
+        # Per-signature metrics from first successful execution (steps are deterministic)
+        first_exec = next((r for r in execution_runs if r.get("success")), None)
+        if first_exec and num_sigs > 0:
+            resource_usage = first_exec["resource_usage"]
             steps = resource_usage.get("n_steps", resource_usage.get("steps", 0))
             if steps > 0:
                 benchmark_result["per_signature_steps"] = steps / num_sigs
-            benchmark_result["per_signature_time"] = exec_metrics["execution_time"] / num_sigs
-        
+
+        # Total time: generation + build + sum of all run times
+        total_time = gen_metrics["generation_time"] + build_metrics["build_time"]
+        total_time += sum(exec_times)
+        total_time += sum(proof_times)
+        benchmark_result["total_time"] = total_time
+
         print(f"\n{'='*60}")
-        print(f"Benchmark completed!")
+        print(f"Benchmark completed! ({len(exec_times)}/{runs} runs succeeded)")
         print(f"Total time: {total_time:.2f}s")
+        if exec_times:
+            stats = benchmark_result["execution_time_stats"]
+            print(f"Execution time — min: {stats['min']:.2f}s  mean: {stats['mean']:.2f}s  max: {stats['max']:.2f}s")
+        if proof_times:
+            stats = benchmark_result["proof_time_stats"]
+            print(f"Proof time     — min: {stats['min']:.2f}s  mean: {stats['mean']:.2f}s  max: {stats['max']:.2f}s")
         if "per_signature_steps" in benchmark_result:
-            print(f"Avg steps per signature: {benchmark_result['per_signature_steps']:,.0f}")
-        if benchmark_result.get("verification", {}).get("success"):
-            print(f"Verification time: {benchmark_result['verification']['verify_time']:.2f}s")
+            print(f"Steps per signature: {benchmark_result['per_signature_steps']:,.0f}")
         print(f"{'='*60}\n")
-        
+
         return benchmark_result
 
     def run_sweep(
@@ -441,18 +437,24 @@ class MultiSigBenchmarkRunner:
         seed: int,
         message_prefix: str = "test",
         run_proof: bool = True,
-        reuse_args: Optional[str] = None
+        reuse_args: Optional[str] = None,
+        runs: int = 1,
     ) -> Dict[str, Any]:
         """Run benchmarks for multiple signature counts and seeds."""
-        result = self.run_benchmark(sig_counts, seed, message_prefix, run_proof, reuse_args)
+        result = self.run_benchmark(sig_counts, seed, message_prefix, run_proof, reuse_args, runs)
         return result
 
     def save_results(self, result: Dict[str, Any], output_file: str = None):
         """Save benchmark results to JSON file."""
         # Check if any stage failed and skip writing logs if so
-        for key in ("generation", "build", "execution", "proof", "verification"):
+        for key in ("generation", "build"):
             if key in result and not result[key].get("success", True):
                 print(f"Skipping result log write due to error in '{key}' stage.")
+                return
+        for key in ("execution_runs", "proof_runs"):
+            runs = result.get(key, [])
+            if runs and not runs[-1].get("success", True):
+                print(f"Skipping result log write due to error in '{key}'.")
                 return
 
         if output_file is None:
@@ -473,37 +475,48 @@ class MultiSigBenchmarkRunner:
 
     def _save_summary(self, result: Dict[str, Any], output_file: Path):
         """Save human-readable summary."""
+        runs = result.get("runs", 1)
         with open(output_file, 'w') as f:
             f.write(f"{self.package} Multi-Signature Benchmark Results\n")
             f.write(f"{'='*60}\n\n")
-            
+
             f.write(f"Benchmark\n")
             f.write(f"{'-'*60}\n")
             f.write(f"Signatures: {result['num_signatures']}\n")
             f.write(f"Seed: {result['seed']}\n")
+            f.write(f"Runs: {runs}\n")
             f.write(f"Timestamp: {result['timestamp']}\n\n")
-            
+
             if result['generation']['success']:
                 f.write(f"Generation Time: {result['generation']['generation_time']:.2f}s\n")
-            
+
             if result['build']['success']:
                 f.write(f"Build Time: {result['build']['build_time']:.2f}s\n")
-            
-            if 'execution' in result and result['execution']['success']:
-                f.write(f"Execution Time: {result['execution']['execution_time']:.2f}s\n")
-                
-                res = result['execution']['resource_usage']
+
+            if 'execution_time_stats' in result:
+                s = result['execution_time_stats']
+                if runs > 1:
+                    f.write(f"Execution Time — min: {s['min']:.2f}s  mean: {s['mean']:.2f}s  max: {s['max']:.2f}s\n")
+                else:
+                    f.write(f"Execution Time: {s['mean']:.2f}s\n")
+
+            first_exec = next((r for r in result.get("execution_runs", []) if r.get("success")), None)
+            if first_exec:
+                res = first_exec["resource_usage"]
                 steps = res.get('n_steps', res.get('steps', 0))
                 if steps > 0:
                     f.write(f"Cairo Steps: {steps:,}\n")
                     f.write(f"Steps per Signature: {result.get('per_signature_steps', 0):,.0f}\n")
-            
-            if 'proof' in result and result['proof'].get('success'):
-                f.write(f"Prover Time: {result['proof']['prover_time']:.2f}s\n")
-                f.write(f"Proof Size: {result['proof']['proof_size_bytes']:,} bytes ({result['proof']['proof_size_kb']:.2f} KB)\n")
 
-            if 'verification' in result and result['verification'].get('success'):
-                f.write(f"Verification Time: {result['verification']['verify_time']:.2f}s\n")
+            if 'proof_time_stats' in result:
+                s = result['proof_time_stats']
+                if runs > 1:
+                    f.write(f"Prover Time    — min: {s['min']:.2f}s  mean: {s['mean']:.2f}s  max: {s['max']:.2f}s\n")
+                else:
+                    f.write(f"Prover Time: {s['mean']:.2f}s\n")
+                last_proof = next((r for r in reversed(result.get("proof_runs", [])) if r.get("success")), None)
+                if last_proof:
+                    f.write(f"Proof Size: {last_proof['proof_size_bytes']:,} bytes ({last_proof['proof_size_kb']:.2f} KB)\n")
 
             f.write(f"Total Time: {result['total_time']:.2f}s\n")
 
@@ -550,6 +563,12 @@ def main():
         default=False,
         help='Skip signature generation if args file exists. Optionally specify a file path to use.'
     )
+    parser.add_argument(
+        '--runs', '-r',
+        type=int,
+        default=1,
+        help='Number of times to repeat the execute/prove steps (default: 1)'
+    )
 
     args = parser.parse_args()
 
@@ -568,7 +587,8 @@ def main():
         seed=args.seed,
         message_prefix=args.message_prefix,
         run_proof=not args.skip_proof,
-        reuse_args=args.reuse_args
+        reuse_args=args.reuse_args,
+        runs=args.runs
     )
     
     # Save results

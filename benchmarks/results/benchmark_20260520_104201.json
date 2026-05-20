@@ -1,0 +1,11 @@
+{
+  "name": "sphincs_benchmark",
+  "timestamp": "2026-05-20T10:42:01.610648",
+  "package": "sphincs-btc",
+  "features": [],
+  "args_file": "packages/sphincs-plus/tests/data/sha2_simple_128s.json",
+  "build": {
+    "success": false,
+    "error": ""
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "benchmarks": {
+    "timestamp": "2026-05-20T10:51:39.778910",
+    "num_signatures": 1,
+    "seed": 0,
+    "message_prefix": "test",
+    "generation": {
+      "success": true,
+      "generation_time": 0.0,
+      "args_file": "/home/scaraven/Documents/stark-sphincs-aggr/benchmarks/results/temp_args/multisig_n1_seed0.json",
+      "num_signatures": 1,
+      "seed": 0,
+      "reused": true
+    },
+    "build": {
+      "success": true,
+      "build_time": 0.21655702590942383,
+      "stdout": "   Compiling lib(sphincs_btc) sphincs_btc v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-btc/Scarb.toml)\n   Compiling executable(main_multi) sphincs_btc v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-btc/Scarb.toml)\n   Compiling executable(main) sphincs_btc v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-btc/Scarb.toml)\n    Finished `release` profile target(s) in 0 seconds\n",
+      "stderr": ""
+    },
+    "execution": {
+      "success": true,
+      "execution_time": 2.6322546005249023,
+      "resource_usage": {},
+      "stdout": "   Executing sphincs_btc\nResources:\n\tsteps: 4,844,217\n\tmax memory address: 4,627,583\n\tmemory holes: 278,878\n\tbuiltins:\n\t\trange_check_builtin: 310,433\n\t\tbitwise_builtin: 10\n\tmemory segments:\n\t\texecution: 4,056,146\n\t\trange_check: 310,433\n\t\tbitwise: 50\nSaving output to: target/execute/sphincs_btc/execution4\n",
+      "stderr": ""
+    },
+    "total_time": 2.848811626434326,
+    "per_signature_time": 2.6322546005249023
+  }
+}

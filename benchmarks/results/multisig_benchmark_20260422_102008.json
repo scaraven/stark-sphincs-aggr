@@ -1,0 +1,31 @@
+{
+  "benchmarks": {
+    "timestamp": "2026-04-22T10:17:40.395027",
+    "num_signatures": 2,
+    "seed": 0,
+    "message_prefix": "test",
+    "generation": {
+      "success": true,
+      "generation_time": 138.7342710494995,
+      "args_file": "/home/scaraven/Documents/stark-sphincs-aggr/benchmarks/results/temp_args/multisig_n2_seed0.json",
+      "num_signatures": 2,
+      "seed": 0,
+      "stderr": "=== SPHINCS+ BTC Test Vector Generator ===\nParameters: n=16, h=32, d=4, k=10, a=14\nNumber of signatures: 2\nRNG seed: 0\n\nSecret seed: 5feceb66ffc86f38d952786c6d696c79\nPublic seed: c2dbc239dd4e91b46729d73a27fb57e9\nComputing public key root (this may take a while)...\nPublic key root: 29f1bc20363681602daa7964b17a52eb\n\nSigning 2 messages using 16 workers...\n  Grinding counter: 100000...\n  Grinding counter: 100000...\n  Completed signature 1/2\n  Completed signature 2/2\n\nTotal elements: 1937\nSignature(s) generated successfully!\n"
+    },
+    "build": {
+      "success": true,
+      "build_time": 2.749561309814453,
+      "stdout": "   Compiling lib(sphincs_btc) sphincs_btc v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-btc/Scarb.toml)\n   Compiling executable(main_multi) sphincs_btc v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-btc/Scarb.toml)\n   Compiling executable(main) sphincs_btc v0.1.0 (/home/scaraven/Documents/stark-sphincs-aggr/packages/sphincs-btc/Scarb.toml)\n    Finished `release` profile target(s) in 3 seconds\n",
+      "stderr": ""
+    },
+    "execution": {
+      "success": true,
+      "execution_time": 6.134401798248291,
+      "resource_usage": {},
+      "stdout": "   Executing sphincs_btc\nResources:\n\tsteps: 9,296,483\n\tmax memory address: 8,882,298\n\tmemory holes: 534,944\n\tbuiltins:\n\t\trange_check_builtin: 595,390\n\t\tbitwise_builtin: 20\n\tmemory segments:\n\t\texecution: 7,783,396\n\t\trange_check: 595,390\n\t\tbitwise: 100\nSaving output to: target/execute/sphincs_btc/execution1\n",
+      "stderr": ""
+    },
+    "total_time": 147.61823415756226,
+    "per_signature_time": 3.0672008991241455
+  }
+}

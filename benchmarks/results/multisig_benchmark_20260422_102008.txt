@@ -1,0 +1,13 @@
+sphincs-btc Multi-Signature Benchmark Results
+============================================================
+
+Benchmark
+------------------------------------------------------------
+Signatures: 2
+Seed: 0
+Timestamp: 2026-04-22T10:17:40.395027
+
+Generation Time: 138.73s
+Build Time: 2.75s
+Execution Time: 6.13s
+Total Time: 147.62s

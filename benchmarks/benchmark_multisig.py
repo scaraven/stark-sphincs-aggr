@@ -28,11 +28,20 @@ class MultiSigBenchmarkRunner:
         "sphincs-poseidon-c" : "poseidon_tiny_multi",
     }
 
+    # Map package names to their single-sig executable names
+    SINGLE_EXECUTABLE_NAMES = {
+        "sphincs-btc": "main",
+        "sphincs-poseidon": "poseidon_main",
+        "schnorr-btc": "schnorr_btc_main",
+        "sphincs-poseidon-c": "poseidon_tiny_main",
+    }
+
     def __init__(self, workspace_root: Path, package: str = "sphincs-btc"):
         self.workspace_root = workspace_root
         self.package = package
         self.sphincs_package = workspace_root / "packages" / package
         self.executable_name = self.EXECUTABLE_NAMES.get(package, "main_multi")
+        self.single_executable_name = self.SINGLE_EXECUTABLE_NAMES.get(package, "main")
         self.target_dir = workspace_root / "target"
         self.results_dir = workspace_root / "benchmarks" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -159,7 +168,7 @@ class MultiSigBenchmarkRunner:
             "stderr": result.stderr
         }
 
-    def execute_program(self, args_file: str) -> Dict[str, Any]:
+    def execute_program(self, args_file: str, num_sigs: int = 2) -> Dict[str, Any]:
         """Execute Cairo program with multi-sig args."""
         print(f"\n{'='*60}")
         print(f"Executing {self.package} program...")
@@ -167,11 +176,12 @@ class MultiSigBenchmarkRunner:
 
         # Convert package name to scarb package name (e.g., sphincs-btc -> sphincs_btc)
         scarb_package = self.package.replace("-", "_")
+        executable = self.single_executable_name if num_sigs == 1 else self.executable_name
         cmd = [
             "scarb", "--profile", "release", "execute",
             "--no-build",
             "--package", scarb_package,
-            "--executable-name", self.executable_name,
+            "--executable-name", executable,
             "--print-resource-usage",
             "--arguments-file", args_file
         ]
@@ -223,7 +233,7 @@ class MultiSigBenchmarkRunner:
         
         return resources
 
-    def generate_proof(self, args_file: str) -> Dict[str, Any]:
+    def generate_proof(self, args_file: str, num_sigs: int = 2) -> Dict[str, Any]:
         """Generate STARK proof for the multi-sig execution."""
         print(f"\n{'='*60}")
         print("Generating STARK proof...")
@@ -246,6 +256,9 @@ class MultiSigBenchmarkRunner:
 
         try:
             proving_task["tasks"][0]["user_args_file"] = str(Path(args_file).resolve())
+            exe_name = self.single_executable_name if num_sigs == 1 else self.executable_name
+            exe_path = self.workspace_root / "target" / "release" / f"{exe_name}.executable.json"
+            proving_task["tasks"][0]["path"] = str(exe_path.resolve())
         except Exception as exc:
             return {"success": False, "error": f"Failed to patch proving task: {exc}"}
 
@@ -344,12 +357,12 @@ class MultiSigBenchmarkRunner:
             return benchmark_result
         
         # Step 3: Execute
-        exec_metrics = self.execute_program(gen_metrics["args_file"])
+        exec_metrics = self.execute_program(gen_metrics["args_file"], num_sigs)
         benchmark_result["execution"] = exec_metrics
         
         # Step 4: Prove
         if run_proof:
-            proof_metrics = self.generate_proof(gen_metrics["args_file"])
+            proof_metrics = self.generate_proof(gen_metrics["args_file"], num_sigs)
             benchmark_result["proof"] = proof_metrics
             if not proof_metrics["success"]:
                 return benchmark_result
@@ -459,7 +472,7 @@ def main():
         '--num-signatures', '-n',
         type=int,
         default=2,
-        help='Number of signatures to benchmark > 1'
+        help='Number of signatures to benchmark (>= 1; use 1 for single-signature baseline)'
     )
     parser.add_argument(
         '--seed',
@@ -496,10 +509,10 @@ def main():
 
     args = parser.parse_args()
 
-    if args.num_signatures <= 1:
-        print("Error: --num-signatures must be at least 2")
+    if args.num_signatures < 1:
+        print("Error: --num-signatures must be at least 1")
         sys.exit(1)
-    
+
     # Find workspace root
     workspace_root = Path(__file__).parent.parent
     

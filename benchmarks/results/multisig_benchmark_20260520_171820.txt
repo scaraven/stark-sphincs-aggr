@@ -1,0 +1,16 @@
+schnorr-btc Multi-Signature Benchmark Results
+============================================================
+
+Benchmark
+------------------------------------------------------------
+Signatures: 1
+Seed: 0
+Runs: 10
+Timestamp: 2026-05-20T17:05:05.085716
+
+Generation Time: 0.00s
+Build Time: 1.10s
+Execution Time — min: 1.87s  mean: 2.19s  max: 3.07s
+Prover Time    — min: 76.11s  mean: 77.24s  max: 78.36s
+Proof Size: 5,730,945 bytes (5596.63 KB)
+Total Time: 795.45s
